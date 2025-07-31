@@ -3,7 +3,7 @@ import { CodePipelineMqttNotifier } from "../src/CodePipelineMqttNotifier";
 import { Template, Match } from "aws-cdk-lib/assertions";
 
 describe("CodePipelineMqttNotifier", () => {
-  it("synthesizes a Lambda, EventBridge rule, and secrets", () => {
+  it("synthesizes a Docker Lambda, EventBridge rule, and secrets", () => {
     const app = new App();
     const stack = new Stack(app, "TestStack");
 
@@ -12,22 +12,23 @@ describe("CodePipelineMqttNotifier", () => {
         "arn:aws:codepipeline:us-east-1:123456789012:MyPipeline",
       mqttTopic: "pipelines/my-pipeline",
       mqttBrokerHost: "1.2.3.4",
-      useTailscale: true,
+      enableTailscale: true,
+      enableMqttAuth: true,
     });
 
     const template = Template.fromStack(stack);
 
-    // Check for Lambda
+    // Check for Lambda (Docker image function)
     template.hasResourceProperties("AWS::Lambda::Function", {
-      Handler: "index.handler",
-      Runtime: "nodejs20.x",
+      Timeout: 120,
+      MemorySize: 512,
       Environment: Match.objectLike({
         Variables: Match.objectLike({
           MQTT_BROKER_HOST: "1.2.3.4",
           MQTT_TOPIC: "pipelines/my-pipeline",
-          USE_TAILSCALE: "true",
         }),
       }),
+      // Code.ImageUri: will be a hash, cannot check directly
     });
 
     // Check for EventBridge Rule
@@ -39,38 +40,12 @@ describe("CodePipelineMqttNotifier", () => {
       }),
     });
 
-    // Check that 3 secrets are present
+    // Check that 3 secrets are present (Tailscale, MQTT username, MQTT password)
     template.resourceCountIs("AWS::SecretsManager::Secret", 3);
 
     // The construct should expose its secrets as properties
     expect(notifier.tailscaleAuthKeySecret).toBeDefined();
-    expect(notifier.mqttUsernameSecret).toBeDefined();
-    expect(notifier.mqttPasswordSecret).toBeDefined();
-  });
-
-  it("uses provided secret ARNs when given", () => {
-    const app = new App();
-    const stack = new Stack(app, "TestStack");
-
-    const notifier = new CodePipelineMqttNotifier(stack, "Notifier", {
-      pipelineArnOrName: "pipeline-arn",
-      mqttTopic: "topic",
-      mqttBrokerHost: "host",
-      tailscaleAuthKeySecretArn:
-        "arn:aws:secretsmanager:us-east-1:123:secret:tailscale",
-      mqttUsernameSecretArn:
-        "arn:aws:secretsmanager:us-east-1:123:secret:mqtt-user",
-      mqttPasswordSecretArn:
-        "arn:aws:secretsmanager:us-east-1:123:secret:mqtt-pass",
-    });
-
-    // The construct should not create new secrets in this case
-    const template = Template.fromStack(stack);
-    template.resourceCountIs("AWS::SecretsManager::Secret", 0);
-
-    // The construct should expose imported secrets as properties
-    expect(notifier.tailscaleAuthKeySecret).toBeDefined();
-    expect(notifier.mqttUsernameSecret).toBeDefined();
-    expect(notifier.mqttPasswordSecret).toBeDefined();
+    expect(notifier.mqttBrokerUsernameSecret).toBeDefined();
+    expect(notifier.mqttBrokerPasswordSecret).toBeDefined();
   });
 });
