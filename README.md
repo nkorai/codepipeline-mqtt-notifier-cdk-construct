@@ -182,41 +182,29 @@ States you may see include: `STARTED`, `RESUMED`, `CANCELED`, `FAILED`, `SUCCEED
 
 ## Development & Contribution
 
-Local testing commands
-
-```bash
-docker build -t mqtt-lambda-tailscale .
-
-echo '{"source":"aws.codepipeline","detail-type":"CodePipeline Pipeline Execution State Change","detail":{"pipeline":"ExamplePipeline","state":"SUCCEEDED"},"time":"2025-07-31T13:00:00Z"}' | docker run -i --rm \
-  -e MQTT_BROKER_HOST=REPLACE_WITH_HOST \
-  -e MQTT_TOPIC=REPLACE_WITH_TOPIC \
-  -e MQTT_DNS_SERVER=REPLACE_IF_NEEDED \
-  -e MQTT_USERNAME_SECRET_ARN=REPLACE_IF_NEEDED \
-  -e MQTT_PASSWORD_SECRET_ARN=REPLACE_IF_NEEDED \
-  -e TAILSCALE_AUTH_KEY_SECRET_ARN=REPLACE_WITH_TAILSCALE_AUTHKEY \
-  -e AWS_REGION=REPLACE_WITH_YOUR_REGION_IF_NEEDED \
-  -e AWS_PROFILE=REPLACE_WITH_YOUR_PROFILE_IF_NEEDED \
-  -v ~/.aws:/root/.aws \
-  -v ~/.aws/sso:/root/.aws/sso:ro \
-  mqtt-lambda-tailscale
-```
-
-Example local test
-
-```bash
-echo '{"source":"aws.codepipeline","detail-type":"CodePipeline Pipeline Execution State Change","detail":{"pipeline":"ExamplePipeline","state":"SUCCEEDED"},"time":"2025-07-31T13:00:00Z"}' | docker run -i --rm \
-  -e MQTT_BROKER_HOST=mybroker.com \
-  -e MQTT_TOPIC=pipelines/mypipeline/status \
-  -e AWS_REGION=us-east-1 \
-  -e AWS_PROFILE=my-profile \
-  -v ~/.aws:/root/.aws \
-  -v ~/.aws/sso:/root/.aws/sso:ro \
-  mqtt-lambda-tailscale
-```
-
 - Pull requests welcome!
 - See `lambda/mqtt-notifier/index.js` for Lambda source.
 - Please open an issue or PR if you add support for other event types or protocols.
+
+---
+
+## Local Development
+
+To test your Lambda locally with full Tailscale support, use:
+
+```bash
+docker build -t mqtt-lambda-tailscale .
+```
+
+Install the SAM CLI, then:
+
+```bash
+sam local invoke MqttNotifierFunction --env-vars env.json -e event.json --docker-network host
+```
+
+- Make sure `env.json` includes the required environment variables (MQTT broker, topic, secrets ARNs, etc.)
+- `event.json` should be shaped like an EventBridge CodePipeline state change event, an example is provided and other examples are provided in the README above.
+- `--docker-network host` ensures your container can reach LAN-local MQTT brokers.
 
 ---
 

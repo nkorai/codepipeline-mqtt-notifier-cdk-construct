@@ -21,12 +21,24 @@ const nodeGlobals = {
 };
 
 export default [
+  // Global ignore rule
+  {
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "sam-installation/**",
+      "env.json",
+      "template.yaml",
+      ".aws-sam/**",
+    ],
+  },
+
   js.configs.recommended,
 
   // TypeScript source + tests (Node, Jest, etc)
   {
     files: ["**/*.ts"],
-    ignores: ["dist/**", "node_modules/**", "src/lambda/**"],
+    ignores: ["src/lambda/**"],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
@@ -64,7 +76,6 @@ export default [
   // Lambda JS files (Node.js only)
   {
     files: ["src/lambda/**/*.js", "src/lambda/**/*.mjs"],
-    ignores: ["dist/**", "node_modules/**"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",

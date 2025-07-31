@@ -1,0 +1,9 @@
+{
+  "source": "aws.codepipeline",
+  "detail-type": "CodePipeline Pipeline Execution State Change",
+  "detail": {
+    "pipeline": "my-pipeline-name",
+    "state": "SUCCEEDED"
+  },
+  "time": "2025-07-31T19:42:00Z"
+}

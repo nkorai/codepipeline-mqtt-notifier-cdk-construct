@@ -1,0 +1,11 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: MQTT Lambda with Tailscale
+
+Resources:
+  MqttNotifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Architectures: [x86_64]
+      ImageUri: mqtt-lambda-tailscale:latest
