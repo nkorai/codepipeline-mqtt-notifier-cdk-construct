@@ -20,6 +20,28 @@ process.on("uncaughtException", (err) => {
 
 console.log("[INFO] index.js entered");
 
+// Helper: Load secret by ARN and extract `value` from JSON or return raw string
+async function getSecret(arn) {
+  if (!arn) return undefined;
+  console.log(`[INFO] Fetching secret: ${arn}`);
+  const client = new SecretsManagerClient();
+  const cmd = new GetSecretValueCommand({ SecretId: arn });
+  const resp = await client.send(cmd);
+  if ("SecretString" in resp) {
+    try {
+      const parsed = JSON.parse(resp.SecretString);
+      if (typeof parsed === "object" && parsed.value) {
+        console.log(`[INFO] Secret ${arn} resolved to .value field`);
+        return parsed.value;
+      }
+    } catch {
+      console.log(`[INFO] Secret ${arn} is raw string`);
+    }
+    return resp.SecretString;
+  }
+  return undefined;
+}
+
 // Wait until Tailscale is connected and routes are available
 async function waitForTailscaleRoute({
   targetIp,
@@ -66,28 +88,6 @@ async function waitForTailscaleRoute({
   throw new Error(`[ERROR] Tailscale routes not ready after ${maxWaitMs}ms`);
 }
 
-// Helper: Load secret by ARN and extract `value` from JSON or return raw string
-async function getSecret(arn) {
-  if (!arn) return undefined;
-  console.log(`[INFO] Fetching secret: ${arn}`);
-  const client = new SecretsManagerClient();
-  const cmd = new GetSecretValueCommand({ SecretId: arn });
-  const resp = await client.send(cmd);
-  if ("SecretString" in resp) {
-    try {
-      const parsed = JSON.parse(resp.SecretString);
-      if (typeof parsed === "object" && parsed.value) {
-        console.log(`[INFO] Secret ${arn} resolved to .value field`);
-        return parsed.value;
-      }
-    } catch {
-      console.log(`[INFO] Secret ${arn} is raw string`);
-    }
-    return resp.SecretString;
-  }
-  return undefined;
-}
-
 // Helper: Wait for port to open (e.g., MQTT broker via Tailscale)
 async function waitForPortOpen({
   host,
@@ -103,18 +103,31 @@ async function waitForPortOpen({
         `[INFO] Attempt ${attempt++}: Connecting to ${host}:${port}...`,
       );
       await new Promise((res, rej) => {
-        const socket = net.connect({ host, port, timeout: 1000 });
+        const socket = net.connect({ host, port });
+        const timeoutHandle = setTimeout(() => {
+          socket.destroy();
+          rej(new Error("Socket timeout"));
+        }, 3000); // adjust if needed
+
         socket.on("connect", () => {
+          clearTimeout(timeoutHandle);
           socket.destroy();
           res();
         });
-        socket.on("error", rej);
-        socket.on("timeout", rej);
+
+        socket.on("error", (err) => {
+          clearTimeout(timeoutHandle);
+          rej(err instanceof Error ? err : new Error("Socket error"));
+        });
       });
       console.log(`[INFO] Port is open.`);
       return true;
     } catch (err) {
-      console.log(`[WARN] Connection attempt failed: ${err.message}`);
+      console.log(
+        `[WARN] Connection attempt failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
       await new Promise((r) => setTimeout(r, intervalMs));
     }
   }
@@ -122,7 +135,6 @@ async function waitForPortOpen({
     `Timeout: Unable to connect to ${host}:${port} after ${timeoutMs}ms`,
   );
 }
-
 // Main Lambda handler
 exports.handler = async (event) => {
   const {
