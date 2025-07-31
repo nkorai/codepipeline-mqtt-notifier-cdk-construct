@@ -1,2 +1,3 @@
 dist
 src/lambda/**/node_modules
+node_modules
