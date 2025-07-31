@@ -1,20 +1,41 @@
 {
   "name": "codepipeline-mqtt-notifier-cdk-construct",
   "version": "0.0.1",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "src/lambda"
   ],
   "scripts": {
-    "build": "tsc",
+    "clean": "rm -rf dist",
+    "build": "npm run clean && npm run format && npm run lint:fix && tsc",
     "test": "jest",
-    "lint": "eslint src test",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --write .",
     "watch": "tsc -w",
     "prepublishOnly": "npm run build && npm run test"
   },
   "peerDependencies": {
-    "aws-cdk-lib": "^2.0.0",
-    "constructs": "^10.0.0"
+    "aws-cdk-lib": "^2.208.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "@aws-cdk/assertions": "^1.203.0",
+    "@aws-cdk/aws-secretsmanager": "^1.203.0",
+    "@eslint/js": "^9.32.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.1.0",
+    "@typescript-eslint/eslint-plugin": "^8.38.0",
+    "@typescript-eslint/parser": "^8.38.0",
+    "aws-cdk-lib": "^2.208.0",
+    "eslint": "^9.32.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.3",
+    "jest": "^30.0.5",
+    "prettier": "^3.6.2",
+    "ts-jest": "^29.4.0"
   }
 }
