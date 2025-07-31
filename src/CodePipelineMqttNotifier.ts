@@ -1,60 +1,114 @@
-import { Construct } from 'constructs';
-import { aws_events as events, aws_lambda as lambda, aws_iam as iam, aws_events_targets as targets, Duration } from 'aws-cdk-lib';
+import { Construct } from "constructs";
+import { Duration } from "aws-cdk-lib";
+import {
+  Function as LambdaFunction,
+  Runtime,
+  Code,
+} from "aws-cdk-lib/aws-lambda";
+import { Rule } from "aws-cdk-lib/aws-events";
+import { LambdaFunction as LambdaTarget } from "aws-cdk-lib/aws-events-targets";
+import { Secret, ISecret } from "aws-cdk-lib/aws-secretsmanager";
+import { Vpc, SubnetSelection, ISecurityGroup } from "aws-cdk-lib/aws-ec2";
 
 export interface CodePipelineMqttNotifierProps {
-  /**
-   * CodePipeline ARN or name to subscribe to.
-   */
   pipelineArnOrName: string;
-
-  /**
-   * The MQTT broker host (private, e.g. your Tailscale IP)
-   */
   mqttBrokerHost: string;
-
-  /**
-   * MQTT topic to publish messages to.
-   */
   mqttTopic: string;
-
-  /**
-   * Optional Lambda environment overrides.
-   */
+  useTailscale?: boolean;
+  tailscaleAuthKeySecretArn?: string;
+  mqttUsernameSecretArn?: string;
+  mqttPasswordSecretArn?: string;
   environment?: Record<string, string>;
+  vpc?: Vpc;
+  subnetSelection?: SubnetSelection;
+  securityGroups?: ISecurityGroup[];
 }
 
 export class CodePipelineMqttNotifier extends Construct {
-  constructor(scope: Construct, id: string, props: CodePipelineMqttNotifierProps) {
+  public readonly tailscaleAuthKeySecret: ISecret;
+  public readonly mqttUsernameSecret: ISecret;
+  public readonly mqttPasswordSecret: ISecret;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: CodePipelineMqttNotifierProps,
+  ) {
     super(scope, id);
 
-    // Lambda to send messages to MQTT
-    const lambdaFn = new lambda.Function(this, 'MqttNotifierLambda', {
-      runtime: lambda.Runtime.NODEJS_20_X,
-      handler: 'index.handler',
-      code: lambda.Code.fromAsset('lambda/mqtt-notifier'), // You'll make this dir next
-      timeout: Duration.seconds(30),
-      environment: {
-        MQTT_BROKER_HOST: props.mqttBrokerHost,
-        MQTT_TOPIC: props.mqttTopic,
-        ...(props.environment || {})
-      },
-      // You'll add secrets for Tailscale auth, MQTT creds etc. later
+    // Helper to create or import a secret
+    const getOrCreateSecret = (
+      name: string,
+      providedArn?: string,
+      defaultValue = "REPLACE_ME",
+    ): ISecret => {
+      if (providedArn) {
+        return Secret.fromSecretCompleteArn(
+          this,
+          `${name}Imported`,
+          providedArn,
+        );
+      }
+      return new Secret(this, name, {
+        secretName: `${id}-${name}`,
+        description: `Secret for ${id} ${name}`,
+        generateSecretString: {
+          secretStringTemplate: JSON.stringify({ value: defaultValue }),
+          generateStringKey: "placeholder", // makes sure 'value' is set
+        },
+      });
+    };
+
+    // Create or import secrets
+    this.tailscaleAuthKeySecret = getOrCreateSecret(
+      "TailscaleAuthKey",
+      props.tailscaleAuthKeySecretArn,
+      "REPLACE_WITH_TAILSCALE_AUTHKEY",
+    );
+    this.mqttUsernameSecret = getOrCreateSecret(
+      "MqttUsername",
+      props.mqttUsernameSecretArn,
+      "REPLACE_WITH_MQTT_USERNAME",
+    );
+    this.mqttPasswordSecret = getOrCreateSecret(
+      "MqttPassword",
+      props.mqttPasswordSecretArn,
+      "REPLACE_WITH_MQTT_PASSWORD",
+    );
+
+    const environment: Record<string, string> = {
+      MQTT_BROKER_HOST: props.mqttBrokerHost,
+      MQTT_TOPIC: props.mqttTopic,
+      USE_TAILSCALE: props.useTailscale ? "true" : "false",
+      TAILSCALE_AUTH_KEY_SECRET_ARN: this.tailscaleAuthKeySecret.secretArn,
+      MQTT_USERNAME_SECRET_ARN: this.mqttUsernameSecret.secretArn,
+      MQTT_PASSWORD_SECRET_ARN: this.mqttPasswordSecret.secretArn,
+      ...props.environment,
+    };
+
+    const lambdaFn = new LambdaFunction(this, "MqttNotifierLambda", {
+      runtime: Runtime.NODEJS_20_X,
+      handler: "index.handler",
+      code: Code.fromAsset("lambda/mqtt-notifier"),
+      timeout: Duration.minutes(2),
+      environment,
+      vpc: props.vpc,
+      vpcSubnets: props.subnetSelection,
+      securityGroups: props.securityGroups,
     });
 
-    // Let the Lambda be invoked by EventBridge
-    lambdaFn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['codepipeline:GetPipelineExecution'],
-      resources: ['*'], // you can scope later
-    }));
+    // Grant Lambda permission to read the secrets
+    this.tailscaleAuthKeySecret.grantRead(lambdaFn);
+    this.mqttUsernameSecret.grantRead(lambdaFn);
+    this.mqttPasswordSecret.grantRead(lambdaFn);
 
-    // EventBridge rule for CodePipeline state changes
-    new events.Rule(this, 'CodePipelineStateChangeRule', {
+    new Rule(this, "CodePipelineStateChangeRule", {
       eventPattern: {
-        source: ['aws.codepipeline'],
-        detailType: ['CodePipeline Pipeline Execution State Change'],
+        source: ["aws.codepipeline"],
+        detailType: ["CodePipeline Pipeline Execution State Change"],
         resources: [props.pipelineArnOrName],
       },
-      targets: [new targets.LambdaFunction(lambdaFn)],
+      targets: [new LambdaTarget(lambdaFn)],
     });
   }
 }
