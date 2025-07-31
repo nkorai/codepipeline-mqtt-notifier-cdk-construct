@@ -1,0 +1,20 @@
+{
+  "name": "codepipeline-mqtt-notifier-cdk-construct",
+  "version": "0.0.1",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint src test",
+    "watch": "tsc -w",
+    "prepublishOnly": "npm run build && npm run test"
+  },
+  "peerDependencies": {
+    "aws-cdk-lib": "^2.0.0",
+    "constructs": "^10.0.0"
+  }
+}
