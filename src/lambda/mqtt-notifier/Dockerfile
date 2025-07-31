@@ -1,5 +1,5 @@
 # ---- Builder ----
-FROM node:18-alpine AS builder
+FROM public.ecr.aws/docker/library/node:18-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -22,5 +22,8 @@ COPY --from=docker.io/tailscale/tailscale:stable /usr/local/bin/tailscale /var/t
 
 # Add bootstrap
 COPY bootstrap /var/runtime/bootstrap
+
+# Add required tools for DNS resolution via Tailscale DNS
+RUN yum install -y bind-utils
 
 ENTRYPOINT ["/var/runtime/bootstrap"]
