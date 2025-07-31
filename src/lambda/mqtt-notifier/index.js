@@ -8,6 +8,18 @@ const { exec } = require("child_process");
 const { promisify } = require("util");
 const execAsync = promisify(exec);
 
+process.on("unhandledRejection", (err) => {
+  console.error("[FATAL] Unhandled rejection:", err);
+  process.exit(1);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[FATAL] Uncaught exception:", err);
+  process.exit(1);
+});
+
+console.log("[INFO] index.js entered");
+
 // Wait until Tailscale is connected and routes are available
 async function waitForTailscaleRoute({
   targetIp,
@@ -127,6 +139,8 @@ exports.handler = async (event) => {
   const mqttPort = 1883;
   const brokerUri = `mqtt://${mqttHost}`;
 
+  console.log("[INFO] Received event: ", event);
+
   console.log("[INFO] Polling for Tailscale route availability...");
   await waitForTailscaleRoute({ targetIp: MQTT_BROKER_HOST });
   console.log("[INFO] Tailscale routing confirmed. Proceeding...");
@@ -188,7 +202,10 @@ exports.handler = async (event) => {
 };
 
 // Local CLI runner (supports stdin or arg)
-if (require.main === module) {
+if (
+  require.main === module &&
+  process.env.AWS_LAMBDA_FUNCTION_NAME === undefined
+) {
   const readStdin = async () =>
     new Promise((res) => {
       let data = "";

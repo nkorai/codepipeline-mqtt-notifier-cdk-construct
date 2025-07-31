@@ -1,48 +1,60 @@
-#!/bin/sh
-set -e
-set -o pipefail
+#!/bin/bash
+set -x
+set -euo pipefail
 
-TAILSCALE_ROOT=/tmp/tailscale
-mkdir -p "$TAILSCALE_ROOT"
+echo "[INFO] Launching tailscale-setup.sh in background if needed..."
+/var/task/tailscale-setup.sh &
 
-# Start tailscaled in the background
-echo "[INFO] Starting tailscaled..."
-/var/task/tailscaled \
-  --tun=userspace-networking \
-  --socks5-server=localhost:1055 \
-  --state="$TAILSCALE_ROOT/tailscaled.state" \
-  --statedir="$TAILSCALE_ROOT" \
-  --socket="$TAILSCALE_ROOT/tailscaled.sock" &
+sleep 2
+echo "[INFO] Tailscale init complete, entering Lambda event loop..."
 
-# Fetch secret with Node.js helper
-if [ -n "$TAILSCALE_AUTH_KEY_SECRET_ARN" ]; then
-  echo "[INFO] Fetching Tailscale auth key..."
-  node /var/task/get-secret.mjs
-  TS_AUTH_KEY=$(cat /tmp/tailscale-auth-key)
-else
-  echo "[INFO] No secret ARN set, skipping Tailscale"
-  exec /var/lang/bin/node index.js
-fi
+while true; do
+  echo "[INFO] Polling for next invocation..."
+  RESPONSE=$(curl -s -i -X GET "http://127.0.0.1:9001/2018-06-01/runtime/invocation/next")
 
-# Validate the key
-if [ "$TS_AUTH_KEY" = "REPLACE_WITH_TAILSCALE_AUTHKEY" ] || [ -z "$TS_AUTH_KEY" ]; then
-  echo "[ERROR] Tailscale auth key not configured properly"
-  exit 1
-fi
+  echo "[DEBUG] Full raw RESPONSE:"
+  echo "$RESPONSE"
 
-# Bring up Tailscale in background
-echo "[INFO] Launching 'tailscale up'..."
-/var/task/tailscale --socket="$TAILSCALE_ROOT/tailscaled.sock" up \
-  --auth-key="$TS_AUTH_KEY" \
-  --hostname=mqtt-lambda \
-  --accept-routes &
-# Let it continue while Lambda starts
+  REQUEST_ID=$(echo "$RESPONSE" | grep -i '^Lambda-Runtime-Aws-Request-Id:' | awk '{ print $2 }' | tr -d '\r')
+  EVENT=$(echo "$RESPONSE" | sed -n '/^\r\{0,1\}$/,$p' | tail -n +2)
 
-# Override DNS if requested
-if [ -n "$MQTT_DNS_SERVER" ]; then
-  echo "[INFO] Overriding /etc/resolv.conf with $MQTT_DNS_SERVER"
-  echo "nameserver $MQTT_DNS_SERVER" > /etc/resolv.conf
-fi
+  echo "[INFO] Handling invocation ID: $REQUEST_ID"
+  echo "[DEBUG] Raw EVENT payload:"
+  echo "$EVENT"
 
-echo "[INFO] Bootstrap complete. Starting Lambda handler..."
-ALL_PROXY="socks5://localhost:1055" exec /var/lang/bin/node index.js
+  # Run Node.js with the event piped into stdin
+  RESULT_FILE=$(mktemp)
+  ERROR_FILE=$(mktemp)
+  if echo "$EVENT" | ALL_PROXY="socks5://localhost:1055" node -e '
+    const { handler } = require("./index.js");
+    const chunks = [];
+    process.stdin.on("data", chunk => chunks.push(chunk));
+    process.stdin.on("end", async () => {
+      try {
+        const event = JSON.parse(chunks.join(""));
+        console.log("[DEBUG] Parsed event object:", event);
+        const result = await handler(event);
+        console.log(JSON.stringify(result ?? {}));
+      } catch (err) {
+        console.error("[FATAL]", err);
+        process.exit(1);
+      }
+    });
+  ' >"$RESULT_FILE" 2>"$ERROR_FILE"; then
+    echo "[INFO] Successfully executed handler, sending response..."
+    curl -s -X POST "http://127.0.0.1:9001/2018-06-01/runtime/invocation/$REQUEST_ID/response" \
+      -H "Content-Type: application/json" \
+      --data-binary "@$RESULT_FILE"
+  else
+    echo "[ERROR] Handler failed. Capturing error message..."
+    ERROR_MESSAGE=$(cat "$ERROR_FILE" | tr -d '\n' | sed 's/"/\\"/g')
+    echo "[DEBUG] Captured ERROR_MESSAGE: $ERROR_MESSAGE"
+    ERROR_JSON="{\"errorType\": \"RuntimeError\", \"errorMessage\": \"$ERROR_MESSAGE\"}"
+    curl -s -X POST "http://127.0.0.1:9001/2018-06-01/runtime/invocation/$REQUEST_ID/error" \
+      -H "Content-Type: application/json" \
+      --data-binary "$ERROR_JSON"
+  fi
+
+  echo "[INFO] Cleaning up temporary files..."
+  rm -f "$RESULT_FILE" "$ERROR_FILE"
+done

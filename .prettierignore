@@ -1,0 +1,6 @@
+dist/
+node_modules/
+sam-installation/
+.aws-sam/
+env.json
+template.yaml
