@@ -9,14 +9,17 @@
     "src/lambda"
   ],
   "scripts": {
-    "clean": "rm -rf dist",
+    "clean": "rm -f codepipeline-mqtt-notifier-cdk-construct*.tgz && rm -rf dist",
+    "build:lambda": "cd src/lambda/mqtt-notifier && npm install && cd ../../..",
     "build": "npm run clean && npm run format && npm run lint:fix && tsc",
+    "prepare": "npm run clean && npm run build:lambda && npm run build",
     "test": "jest",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
     "format": "prettier --write .",
     "watch": "tsc -w",
-    "prepublishOnly": "npm run build && npm run test"
+    "prepublishOnly": "npm run build && npm run test",
+    "postbuild": "cp -r src/lambda dist/lambda"
   },
   "peerDependencies": {
     "aws-cdk-lib": "^2.208.0",
