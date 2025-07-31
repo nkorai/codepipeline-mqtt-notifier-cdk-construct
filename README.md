@@ -57,9 +57,6 @@ new CodePipelineMqttNotifier(this, "Notifier", {
   mqttBrokerHost: "100.x.y.z",
   enableTailscale: true,
   enableMqttAuth: true,
-  vpc,
-  subnetSelection: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-  securityGroups: [sg],
 });
 ```
 
