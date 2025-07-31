@@ -36,15 +36,11 @@ sleep 2
   --hostname=mqtt-lambda \
   --accept-routes
 
-# Resolve MQTT_BROKER_HOST if it's a hostname (not an IP)
-# echo "[INFO] Resolving MQTT broker hostname $MQTT_BROKER_HOST via drill..."
-# RESOLVED_IP=$(drill "$MQTT_BROKER_HOST" +short | grep '^[0-9]' | head -n1)
-# if [ -n "$RESOLVED_IP" ]; then
-#   echo "[INFO] Resolved $MQTT_BROKER_HOST to $RESOLVED_IP"
-#   export MQTT_BROKER_HOST="$RESOLVED_IP"
-# else
-#   echo "[WARN] Could not resolve $MQTT_BROKER_HOST via drill. Using as-is."
-# fi
+# Override DNS if provided
+if [ -n "$MQTT_DNS_SERVER" ]; then
+  echo "[INFO] Overriding /etc/resolv.conf with $MQTT_DNS_SERVER"
+  echo "nameserver $MQTT_DNS_SERVER" > /etc/resolv.conf
+fi
 
 echo "[INFO] Tailscale started. Invoking Lambda..."
 ALL_PROXY="socks5://localhost:1055" exec node index.js
