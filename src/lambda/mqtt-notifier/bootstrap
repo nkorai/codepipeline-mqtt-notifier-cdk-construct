@@ -5,6 +5,15 @@ set -o pipefail
 TAILSCALE_ROOT=/tmp/tailscale
 mkdir -p "$TAILSCALE_ROOT"
 
+# Start tailscaled in the background
+echo "[INFO] Starting tailscaled..."
+/var/task/tailscaled \
+  --tun=userspace-networking \
+  --socks5-server=localhost:1055 \
+  --state="$TAILSCALE_ROOT/tailscaled.state" \
+  --statedir="$TAILSCALE_ROOT" \
+  --socket="$TAILSCALE_ROOT/tailscaled.sock" &
+
 # Fetch secret with Node.js helper
 if [ -n "$TAILSCALE_AUTH_KEY_SECRET_ARN" ]; then
   echo "[INFO] Fetching Tailscale auth key..."
@@ -15,32 +24,25 @@ else
   exec /var/lang/bin/node index.js
 fi
 
-# Validate key
+# Validate the key
 if [ "$TS_AUTH_KEY" = "REPLACE_WITH_TAILSCALE_AUTHKEY" ] || [ -z "$TS_AUTH_KEY" ]; then
   echo "[ERROR] Tailscale auth key not configured properly"
   exit 1
 fi
 
-# Start Tailscale daemon
-/var/task/tailscaled \
-  --tun=userspace-networking \
-  --socks5-server=localhost:1055 \
-  --state="$TAILSCALE_ROOT/tailscaled.state" \
-  --statedir="$TAILSCALE_ROOT" \
-  --socket="$TAILSCALE_ROOT/tailscaled.sock" &
-sleep 2
-
-# Bring up Tailscale
+# Bring up Tailscale in background
+echo "[INFO] Launching 'tailscale up'..."
 /var/task/tailscale --socket="$TAILSCALE_ROOT/tailscaled.sock" up \
   --auth-key="$TS_AUTH_KEY" \
   --hostname=mqtt-lambda \
-  --accept-routes
+  --accept-routes &
+# Let it continue while Lambda starts
 
-# Override DNS if provided
+# Override DNS if requested
 if [ -n "$MQTT_DNS_SERVER" ]; then
   echo "[INFO] Overriding /etc/resolv.conf with $MQTT_DNS_SERVER"
   echo "nameserver $MQTT_DNS_SERVER" > /etc/resolv.conf
 fi
 
-echo "[INFO] Tailscale started. Invoking Lambda..."
-ALL_PROXY="socks5://localhost:1055" exec node index.js
+echo "[INFO] Bootstrap complete. Starting Lambda handler..."
+ALL_PROXY="socks5://localhost:1055" exec /var/lang/bin/node index.js

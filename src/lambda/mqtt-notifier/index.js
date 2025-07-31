@@ -4,6 +4,55 @@ const {
   SecretsManagerClient,
   GetSecretValueCommand,
 } = require("@aws-sdk/client-secrets-manager");
+const { exec } = require("child_process");
+const { promisify } = require("util");
+const execAsync = promisify(exec);
+
+// Wait until Tailscale is connected and routes are available
+async function waitForTailscaleRoute({
+  targetIp,
+  maxWaitMs = 20000,
+  intervalMs = 1000,
+}) {
+  const start = Date.now();
+  let attempt = 1;
+
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      console.log(
+        `[INFO] [Tailscale Wait] Attempt ${attempt++}: Checking status...`,
+      );
+
+      const TS_SOCKET = "/tmp/tailscale/tailscaled.sock";
+      const { stdout } = await execAsync(
+        `./tailscale --socket=${TS_SOCKET} status --json`,
+      );
+      const status = JSON.parse(stdout);
+
+      const peerOk = Object.values(status.Peer).some(
+        (peer) =>
+          peer.TailscaleIPs?.some((ip) =>
+            targetIp?.startsWith(ip.split(".")[0]),
+          ) || false,
+      );
+
+      if (peerOk || Object.keys(status.Peer ?? {}).length > 0) {
+        console.log(`[INFO] [Tailscale Wait] Found active peer routes`);
+        return;
+      } else {
+        console.log(`[WARN] [Tailscale Wait] No usable peers yet`);
+      }
+    } catch (err) {
+      console.warn(
+        `[WARN] [Tailscale Wait] Failed to get status: ${err.message}`,
+      );
+    }
+
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+
+  throw new Error(`[ERROR] Tailscale routes not ready after ${maxWaitMs}ms`);
+}
 
 // Helper: Load secret by ARN and extract `value` from JSON or return raw string
 async function getSecret(arn) {
@@ -77,6 +126,10 @@ exports.handler = async (event) => {
   const mqttHost = MQTT_BROKER_HOST;
   const mqttPort = 1883;
   const brokerUri = `mqtt://${mqttHost}`;
+
+  console.log("[INFO] Polling for Tailscale route availability...");
+  await waitForTailscaleRoute({ targetIp: MQTT_BROKER_HOST });
+  console.log("[INFO] Tailscale routing confirmed. Proceeding...");
 
   console.log(`[INFO] Using broker URI: ${brokerUri}`);
   console.log(`[INFO] Waiting for broker to be reachable...`);
