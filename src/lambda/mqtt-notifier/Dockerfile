@@ -17,13 +17,10 @@ COPY --from=builder /app /var/task
 COPY get-secret.mjs /var/task/get-secret.mjs
 
 # Add Tailscale
-COPY --from=docker.io/tailscale/tailscale:stable /usr/local/bin/tailscaled /var/task/tailscaled
-COPY --from=docker.io/tailscale/tailscale:stable /usr/local/bin/tailscale /var/task/tailscale
+COPY --from=public.ecr.aws/w1n5o3h3/tailscale:latest /usr/local/bin/tailscaled /var/task/tailscaled
+COPY --from=public.ecr.aws/w1n5o3h3/tailscale:latest /usr/local/bin/tailscale /var/task/tailscale
 
 # Add bootstrap
 COPY bootstrap /var/runtime/bootstrap
-
-# Add required tools for DNS resolution via Tailscale DNS
-RUN yum install -y bind-utils
 
 ENTRYPOINT ["/var/runtime/bootstrap"]

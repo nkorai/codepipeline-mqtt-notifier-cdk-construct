@@ -24,6 +24,7 @@ export interface CodePipelineMqttNotifierProps {
   pipelineArnOrName: string;
   mqttBrokerHost: string;
   mqttTopic: string;
+  mqttBrokerDnsServer?: string;
   enableTailscale?: boolean;
   enableMqttAuth?: boolean;
   vpc?: Vpc;
@@ -72,6 +73,9 @@ export class CodePipelineMqttNotifier extends Construct {
     const environment: Record<string, string> = {
       MQTT_BROKER_HOST: props.mqttBrokerHost,
       MQTT_TOPIC: props.mqttTopic,
+      ...(props.mqttBrokerDnsServer && {
+        MQTT_DNS_SERVER: props.mqttBrokerDnsServer,
+      }),
     };
 
     if (props.enableTailscale && this.tailscaleAuthKeySecret) {
