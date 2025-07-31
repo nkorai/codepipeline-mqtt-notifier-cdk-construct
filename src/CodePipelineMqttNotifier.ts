@@ -1,5 +1,5 @@
 import { Construct } from "constructs";
-import { Duration, Stack } from "aws-cdk-lib";
+import { Duration, SecretValue, Stack } from "aws-cdk-lib";
 import { DockerImageFunction, DockerImageCode } from "aws-cdk-lib/aws-lambda";
 import { Rule } from "aws-cdk-lib/aws-events";
 import { LambdaFunction as LambdaTarget } from "aws-cdk-lib/aws-events-targets";
@@ -47,37 +47,27 @@ export class CodePipelineMqttNotifier extends Construct {
       this.tailscaleAuthKeySecret = new Secret(this, "TailscaleAuthKey", {
         secretName: `${id}-TailscaleAuthKey`,
         description: `Tailscale Auth Key for ${id}`,
-        generateSecretString: {
-          secretStringTemplate: JSON.stringify({
-            value: "REPLACE_WITH_TAILSCALE_AUTHKEY",
-          }),
-          generateStringKey: "placeholder",
-        },
+        secretStringValue: SecretValue.unsafePlainText(
+          JSON.stringify({ value: "REPLACE_WITH_TAILSCALE_AUTHKEY" }),
+        ),
       });
     }
 
-    if (props.enableMqttAuth) {
-      this.mqttBrokerUsernameSecret = new Secret(this, "MqttBrokerUsername", {
-        secretName: `${id}-MqttBrokerUsername`,
-        description: `MQTT Broker Username for ${id}`,
-        generateSecretString: {
-          secretStringTemplate: JSON.stringify({
-            value: "REPLACE_WITH_MQTT_USERNAME",
-          }),
-          generateStringKey: "placeholder",
-        },
-      });
-      this.mqttBrokerPasswordSecret = new Secret(this, "MqttBrokerPassword", {
-        secretName: `${id}-MqttBrokerPassword`,
-        description: `MQTT Broker Password for ${id}`,
-        generateSecretString: {
-          secretStringTemplate: JSON.stringify({
-            value: "REPLACE_WITH_MQTT_PASSWORD",
-          }),
-          generateStringKey: "placeholder",
-        },
-      });
-    }
+    this.mqttBrokerUsernameSecret = new Secret(this, "MqttBrokerUsername", {
+      secretName: `${id}-MqttBrokerUsername`,
+      description: `MQTT Broker Username for ${id}`,
+      secretStringValue: SecretValue.unsafePlainText(
+        JSON.stringify({ value: "REPLACE_WITH_MQTT_USERNAME" }),
+      ),
+    });
+
+    this.mqttBrokerPasswordSecret = new Secret(this, "MqttBrokerPassword", {
+      secretName: `${id}-MqttBrokerPassword`,
+      description: `MQTT Broker Password for ${id}`,
+      secretStringValue: SecretValue.unsafePlainText(
+        JSON.stringify({ value: "REPLACE_WITH_MQTT_PASSWORD" }),
+      ),
+    });
 
     const environment: Record<string, string> = {
       MQTT_BROKER_HOST: props.mqttBrokerHost,
@@ -111,7 +101,6 @@ export class CodePipelineMqttNotifier extends Construct {
       vpcSubnets: props.subnetSelection,
       securityGroups: props.securityGroups,
     });
-
     if (props.enableTailscale && this.tailscaleAuthKeySecret) {
       this.tailscaleAuthKeySecret.grantRead(lambdaFn);
     }

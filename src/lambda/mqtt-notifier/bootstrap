@@ -1,33 +1,40 @@
 #!/bin/sh
 set -e
+set -o pipefail
 
-# If the environment variable is not set, skip Tailscale entirely.
-if [ -z "$TAILSCALE_AUTH_KEY_SECRET_ARN" ]; then
-  echo "[INFO] TAILSCALE_AUTH_KEY_SECRET_ARN is not set, skipping Tailscale configuration"
+TAILSCALE_ROOT=/tmp/tailscale
+mkdir -p "$TAILSCALE_ROOT"
+
+# Fetch secret with Node.js helper
+if [ -n "$TAILSCALE_AUTH_KEY_SECRET_ARN" ]; then
+  echo "[INFO] Fetching Tailscale auth key..."
+  node /var/task/get-secret.mjs
+  TS_AUTH_KEY=$(cat /tmp/tailscale-auth-key)
+else
+  echo "[INFO] No secret ARN set, skipping Tailscale"
   exec /var/lang/bin/node index.js
 fi
 
-# Fetch Tailscale Auth Key from AWS Secrets Manager.
-TS_AUTH_KEY=$(aws secretsmanager get-secret-value --secret-id "$TAILSCALE_AUTH_KEY_SECRET_ARN" --query 'SecretString' --output text | jq -r '.value // .')
-
-# Skip if missing or set to placeholder.
-if [ "$TS_AUTH_KEY" = "REPLACE_WITH_TAILSCALE_AUTHKEY" ]; then
-  echo "[INFO] Tailscale Auth Key is not configured (still placeholder), skipping Tailscale configuration."
-  exec /var/lang/bin/node index.js
+# Validate key
+if [ "$TS_AUTH_KEY" = "REPLACE_WITH_TAILSCALE_AUTHKEY" ] || [ -z "$TS_AUTH_KEY" ]; then
+  echo "[ERROR] Tailscale auth key not configured properly"
+  exit 1
 fi
 
-# Start Tailscale in userspace-networking mode, with a SOCKS5 proxy for egress.
-mkdir -p /tmp/tailscale
-/var/task/tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
-
-# Wait for tailscaled to start up.
+# Start Tailscale daemon
+/var/task/tailscaled \
+  --tun=userspace-networking \
+  --socks5-server=localhost:1055 \
+  --state="$TAILSCALE_ROOT/tailscaled.state" \
+  --statedir="$TAILSCALE_ROOT" \
+  --socket="$TAILSCALE_ROOT/tailscaled.sock" &
 sleep 2
 
-# Authenticate and bring up the interface.
-echo "[INFO] Starting Tailscale with provided Auth Key..."
-/var/task/tailscale up --auth-key="$TS_AUTH_KEY" --hostname=mqtt-lambda
+# Bring up Tailscale
+/var/task/tailscale --socket="$TAILSCALE_ROOT/tailscaled.sock" up \
+  --auth-key="$TS_AUTH_KEY" \
+  --hostname=mqtt-lambda \
+  --accept-routes
 
-echo "[INFO] Tailscale started, invoking Lambda..."
-
-# Run Node.js Lambda handler, forcing all egress through SOCKS5.
-ALL_PROXY="socks5://localhost:1055" exec /var/lang/bin/node index.js
+echo "[INFO] Tailscale started. Invoking Lambda..."
+ALL_PROXY="socks5://localhost:1055" exec node index.js

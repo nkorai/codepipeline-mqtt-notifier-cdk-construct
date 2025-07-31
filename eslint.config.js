@@ -22,10 +22,11 @@ const nodeGlobals = {
 
 export default [
   js.configs.recommended,
+
   // TypeScript source + tests (Node, Jest, etc)
   {
     files: ["**/*.ts"],
-    ignores: ["dist/**", "node_modules/**"],
+    ignores: ["dist/**", "node_modules/**", "src/lambda/**"],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
@@ -62,10 +63,10 @@ export default [
 
   // Lambda JS files (Node.js only)
   {
-    files: ["src/lambda/**/*.js"],
+    files: ["src/lambda/**/*.js", "src/lambda/**/*.mjs"],
     ignores: ["dist/**", "node_modules/**"],
     languageOptions: {
-      ecmaVersion: 2020,
+      ecmaVersion: 2022,
       sourceType: "module",
       globals: nodeGlobals,
     },
@@ -77,5 +78,6 @@ export default [
       "prettier/prettier": "error",
     },
   },
+
   prettierConfig,
 ];
