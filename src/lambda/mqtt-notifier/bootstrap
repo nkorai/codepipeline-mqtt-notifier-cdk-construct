@@ -1,31 +1,33 @@
 #!/bin/sh
 set -e
 
-# Fetch Tailscale Auth Key using AWS CLI (waits for credentials to be ready in Lambda)
-if [ -n "$TAILSCALE_AUTH_KEY_SECRET_ARN" ]; then
-  # This assumes the Lambda has IAM permission to access the secret!
-  TS_AUTH_KEY=$(aws secretsmanager get-secret-value --secret-id "$TAILSCALE_AUTH_KEY_SECRET_ARN" --query 'SecretString' --output text | jq -r '.value // .')
-  if [ "$TS_AUTH_KEY" = "null" ]; then
-    echo "[ERROR] Tailscale Auth Key could not be found in the secret (missing .value?)"
-    exit 1
-  fi
-else
-  echo "[ERROR] TAILSCALE_AUTH_KEY_SECRET_ARN not set!"
-  exit 1
+# If the environment variable is not set, skip Tailscale entirely.
+if [ -z "$TAILSCALE_AUTH_KEY_SECRET_ARN" ]; then
+  echo "[INFO] TAILSCALE_AUTH_KEY_SECRET_ARN is not set, skipping Tailscale configuration"
+  exec /var/lang/bin/node index.js
 fi
 
-# Start Tailscale in userspace-networking mode, with a SOCKS5 proxy for egress
+# Fetch Tailscale Auth Key from AWS Secrets Manager.
+TS_AUTH_KEY=$(aws secretsmanager get-secret-value --secret-id "$TAILSCALE_AUTH_KEY_SECRET_ARN" --query 'SecretString' --output text | jq -r '.value // .')
+
+# Skip if missing or set to placeholder.
+if [ "$TS_AUTH_KEY" = "REPLACE_WITH_TAILSCALE_AUTHKEY" ]; then
+  echo "[INFO] Tailscale Auth Key is not configured (still placeholder), skipping Tailscale configuration."
+  exec /var/lang/bin/node index.js
+fi
+
+# Start Tailscale in userspace-networking mode, with a SOCKS5 proxy for egress.
 mkdir -p /tmp/tailscale
 /var/task/tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
 
-# Wait for tailscaled to start up
+# Wait for tailscaled to start up.
 sleep 2
 
-# Authenticate and bring up the interface
+# Authenticate and bring up the interface.
+echo "[INFO] Starting Tailscale with provided Auth Key..."
 /var/task/tailscale up --auth-key="$TS_AUTH_KEY" --hostname=mqtt-lambda
 
-echo "Tailscale started, invoking Lambda..."
+echo "[INFO] Tailscale started, invoking Lambda..."
 
-# Run Node.js Lambda handler, forcing all egress through SOCKS5
-# Lambda passes the event payload via /var/runtime/bootstrap's stdin
-ALL_PROXY="socks5://localhost:1055" /var/lang/bin/node index.js
+# Run Node.js Lambda handler, forcing all egress through SOCKS5.
+ALL_PROXY="socks5://localhost:1055" exec /var/lang/bin/node index.js
