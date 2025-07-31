@@ -1,33 +1,27 @@
 import { Construct } from "constructs";
 import { Duration } from "aws-cdk-lib";
-import {
-  Function as LambdaFunction,
-  Runtime,
-  Code,
-} from "aws-cdk-lib/aws-lambda";
+import { DockerImageFunction, DockerImageCode } from "aws-cdk-lib/aws-lambda";
 import { Rule } from "aws-cdk-lib/aws-events";
 import { LambdaFunction as LambdaTarget } from "aws-cdk-lib/aws-events-targets";
 import { Secret, ISecret } from "aws-cdk-lib/aws-secretsmanager";
 import { Vpc, SubnetSelection, ISecurityGroup } from "aws-cdk-lib/aws-ec2";
+import path from "path";
 
 export interface CodePipelineMqttNotifierProps {
   pipelineArnOrName: string;
   mqttBrokerHost: string;
   mqttTopic: string;
-  useTailscale?: boolean;
-  tailscaleAuthKeySecretArn?: string;
-  mqttUsernameSecretArn?: string;
-  mqttPasswordSecretArn?: string;
-  environment?: Record<string, string>;
+  enableTailscale?: boolean;
+  enableMqttAuth?: boolean;
   vpc?: Vpc;
   subnetSelection?: SubnetSelection;
   securityGroups?: ISecurityGroup[];
 }
 
 export class CodePipelineMqttNotifier extends Construct {
-  public readonly tailscaleAuthKeySecret: ISecret;
-  public readonly mqttUsernameSecret: ISecret;
-  public readonly mqttPasswordSecret: ISecret;
+  public readonly tailscaleAuthKeySecret?: ISecret;
+  public readonly mqttBrokerUsernameSecret?: ISecret;
+  public readonly mqttBrokerPasswordSecret?: ISecret;
 
   constructor(
     scope: Construct,
@@ -36,71 +30,86 @@ export class CodePipelineMqttNotifier extends Construct {
   ) {
     super(scope, id);
 
-    // Helper to create or import a secret
-    const getOrCreateSecret = (
-      name: string,
-      providedArn?: string,
-      defaultValue = "REPLACE_ME",
-    ): ISecret => {
-      if (providedArn) {
-        return Secret.fromSecretCompleteArn(
-          this,
-          `${name}Imported`,
-          providedArn,
-        );
-      }
-      return new Secret(this, name, {
-        secretName: `${id}-${name}`,
-        description: `Secret for ${id} ${name}`,
+    if (props.enableTailscale) {
+      this.tailscaleAuthKeySecret = new Secret(this, "TailscaleAuthKey", {
+        secretName: `${id}-TailscaleAuthKey`,
+        description: `Tailscale Auth Key for ${id}`,
         generateSecretString: {
-          secretStringTemplate: JSON.stringify({ value: defaultValue }),
-          generateStringKey: "placeholder", // makes sure 'value' is set
+          secretStringTemplate: JSON.stringify({
+            value: "REPLACE_WITH_TAILSCALE_AUTHKEY",
+          }),
+          generateStringKey: "placeholder",
         },
       });
-    };
+    }
 
-    // Create or import secrets
-    this.tailscaleAuthKeySecret = getOrCreateSecret(
-      "TailscaleAuthKey",
-      props.tailscaleAuthKeySecretArn,
-      "REPLACE_WITH_TAILSCALE_AUTHKEY",
-    );
-    this.mqttUsernameSecret = getOrCreateSecret(
-      "MqttUsername",
-      props.mqttUsernameSecretArn,
-      "REPLACE_WITH_MQTT_USERNAME",
-    );
-    this.mqttPasswordSecret = getOrCreateSecret(
-      "MqttPassword",
-      props.mqttPasswordSecretArn,
-      "REPLACE_WITH_MQTT_PASSWORD",
-    );
+    if (props.enableMqttAuth) {
+      this.mqttBrokerUsernameSecret = new Secret(this, "MqttBrokerUsername", {
+        secretName: `${id}-MqttBrokerUsername`,
+        description: `MQTT Broker Username for ${id}`,
+        generateSecretString: {
+          secretStringTemplate: JSON.stringify({
+            value: "REPLACE_WITH_MQTT_USERNAME",
+          }),
+          generateStringKey: "placeholder",
+        },
+      });
+      this.mqttBrokerPasswordSecret = new Secret(this, "MqttBrokerPassword", {
+        secretName: `${id}-MqttBrokerPassword`,
+        description: `MQTT Broker Password for ${id}`,
+        generateSecretString: {
+          secretStringTemplate: JSON.stringify({
+            value: "REPLACE_WITH_MQTT_PASSWORD",
+          }),
+          generateStringKey: "placeholder",
+        },
+      });
+    }
 
     const environment: Record<string, string> = {
       MQTT_BROKER_HOST: props.mqttBrokerHost,
       MQTT_TOPIC: props.mqttTopic,
-      USE_TAILSCALE: props.useTailscale ? "true" : "false",
-      TAILSCALE_AUTH_KEY_SECRET_ARN: this.tailscaleAuthKeySecret.secretArn,
-      MQTT_USERNAME_SECRET_ARN: this.mqttUsernameSecret.secretArn,
-      MQTT_PASSWORD_SECRET_ARN: this.mqttPasswordSecret.secretArn,
-      ...props.environment,
     };
 
-    const lambdaFn = new LambdaFunction(this, "MqttNotifierLambda", {
-      runtime: Runtime.NODEJS_20_X,
-      handler: "index.handler",
-      code: Code.fromAsset("lambda/mqtt-notifier"),
+    if (props.enableTailscale && this.tailscaleAuthKeySecret) {
+      environment.TAILSCALE_AUTH_KEY_SECRET_ARN =
+        this.tailscaleAuthKeySecret.secretArn;
+    }
+
+    if (
+      props.enableMqttAuth &&
+      this.mqttBrokerUsernameSecret &&
+      this.mqttBrokerPasswordSecret
+    ) {
+      environment.MQTT_USERNAME_SECRET_ARN =
+        this.mqttBrokerUsernameSecret.secretArn;
+      environment.MQTT_PASSWORD_SECRET_ARN =
+        this.mqttBrokerPasswordSecret.secretArn;
+    }
+
+    const lambdaFn = new DockerImageFunction(this, "MqttNotifierLambda", {
+      code: DockerImageCode.fromImageAsset(
+        path.join(__dirname, "lambda/mqtt-notifier"),
+      ),
       timeout: Duration.minutes(2),
+      memorySize: 512,
       environment,
       vpc: props.vpc,
       vpcSubnets: props.subnetSelection,
       securityGroups: props.securityGroups,
     });
 
-    // Grant Lambda permission to read the secrets
-    this.tailscaleAuthKeySecret.grantRead(lambdaFn);
-    this.mqttUsernameSecret.grantRead(lambdaFn);
-    this.mqttPasswordSecret.grantRead(lambdaFn);
+    if (props.enableTailscale && this.tailscaleAuthKeySecret) {
+      this.tailscaleAuthKeySecret.grantRead(lambdaFn);
+    }
+    if (
+      props.enableMqttAuth &&
+      this.mqttBrokerUsernameSecret &&
+      this.mqttBrokerPasswordSecret
+    ) {
+      this.mqttBrokerUsernameSecret.grantRead(lambdaFn);
+      this.mqttBrokerPasswordSecret.grantRead(lambdaFn);
+    }
 
     new Rule(this, "CodePipelineStateChangeRule", {
       eventPattern: {

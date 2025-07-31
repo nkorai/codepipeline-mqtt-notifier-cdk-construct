@@ -1,12 +1,8 @@
 {
   "name": "mqtt-notifier-lambda",
   "version": "1.0.0",
-  "scripts": {
-    "install:tailscale": "mkdir -p tailscale && curl -L https://pkgs.tailscale.com/stable/tailscale_1.86.2_amd64.tgz | tar xz -C tailscale && chmod +x tailscale/tailscale tailscale/tailscaled",
-    "build:lambda": "cd lambda/mqtt-notifier && npm install && cd ../..",
-    "build": "tsc && npm run build:lambda"
-  },
   "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.857.0",
     "mqtt": "^5.3.5"
   }
 }
