@@ -1,11 +1,24 @@
 import { Construct } from "constructs";
-import { Duration } from "aws-cdk-lib";
+import { Duration, Stack } from "aws-cdk-lib";
 import { DockerImageFunction, DockerImageCode } from "aws-cdk-lib/aws-lambda";
 import { Rule } from "aws-cdk-lib/aws-events";
 import { LambdaFunction as LambdaTarget } from "aws-cdk-lib/aws-events-targets";
 import { Secret, ISecret } from "aws-cdk-lib/aws-secretsmanager";
 import { Vpc, SubnetSelection, ISecurityGroup } from "aws-cdk-lib/aws-ec2";
 import path from "path";
+
+function resolvePipelineArn(
+  scope: Construct,
+  pipelineArnOrName: string,
+): string {
+  // Check if already an ARN
+  if (/^arn:aws:codepipeline:[a-z0-9-]+:\d{12}:.+/i.test(pipelineArnOrName)) {
+    return pipelineArnOrName;
+  }
+  // Derive ARN from name, using CDK context
+  const stack = Stack.of(scope);
+  return `arn:aws:codepipeline:${stack.region}:${stack.account}:${pipelineArnOrName}`;
+}
 
 export interface CodePipelineMqttNotifierProps {
   pipelineArnOrName: string;
@@ -115,7 +128,7 @@ export class CodePipelineMqttNotifier extends Construct {
       eventPattern: {
         source: ["aws.codepipeline"],
         detailType: ["CodePipeline Pipeline Execution State Change"],
-        resources: [props.pipelineArnOrName],
+        resources: [resolvePipelineArn(this, props.pipelineArnOrName)],
       },
       targets: [new LambdaTarget(lambdaFn)],
     });

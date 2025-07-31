@@ -1,12 +1,13 @@
 {
   "name": "codepipeline-mqtt-notifier-cdk-construct",
-  "version": "0.0.1",
-  "type": "module",
+  "version": "0.0.2",
+  "author": {
+    "name": "Nausherwan Korai"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist",
-    "src/lambda"
+    "dist"
   ],
   "scripts": {
     "clean": "rm -f codepipeline-mqtt-notifier-cdk-construct*.tgz && rm -rf dist",
@@ -27,8 +28,6 @@
   },
   "devDependencies": {
     "@aws-cdk/assertions": "^1.203.0",
-    "@aws-cdk/aws-secretsmanager": "^1.203.0",
-    "@eslint/js": "^9.32.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.1.0",
     "@typescript-eslint/eslint-plugin": "^8.38.0",

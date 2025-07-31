@@ -1,9 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "NodeNext",
+    "module": "CommonJS",
     "lib": ["ES2020"],
-    "moduleResolution": "NodeNext",
+    "moduleResolution": "node",
     "outDir": "dist",
     "declaration": true,
     "declarationMap": true,
@@ -15,8 +15,8 @@
     "resolveJsonModule": true,
     "noImplicitAny": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["node"]
+    "types": ["node", "jest"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts"],
   "exclude": ["dist", "node_modules", "src/lambda/**/*.js"]
 }
