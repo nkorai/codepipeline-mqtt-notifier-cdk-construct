@@ -187,9 +187,10 @@ Local testing commands
 ```bash
 docker build -t mqtt-lambda-tailscale .
 
-docker run --rm \
+echo '{"source":"aws.codepipeline","detail-type":"CodePipeline Pipeline Execution State Change","detail":{"pipeline":"ExamplePipeline","state":"SUCCEEDED"},"time":"2025-07-31T13:00:00Z"}' | docker run -i --rm \
   -e MQTT_BROKER_HOST=REPLACE_WITH_HOST \
   -e MQTT_TOPIC=REPLACE_WITH_TOPIC \
+  -e MQTT_DNS_SERVER=REPLACE_IF_NEEDED \
   -e MQTT_USERNAME_SECRET_ARN=REPLACE_IF_NEEDED \
   -e MQTT_PASSWORD_SECRET_ARN=REPLACE_IF_NEEDED \
   -e TAILSCALE_AUTH_KEY_SECRET_ARN=REPLACE_WITH_TAILSCALE_AUTHKEY \
@@ -197,26 +198,20 @@ docker run --rm \
   -e AWS_PROFILE=REPLACE_WITH_YOUR_PROFILE_IF_NEEDED \
   -v ~/.aws:/root/.aws \
   -v ~/.aws/sso:/root/.aws/sso:ro \
-  --entrypoint node \
-  mqtt-lambda-tailscale \
-  index.js \
-  '{"source":"aws.codepipeline","detail-type":"CodePipeline Pipeline Execution State Change","detail":{"pipeline":"ExamplePipeline","state":"SUCCEEDED"},"time":"2025-07-31T13:00:00Z"}'
+  mqtt-lambda-tailscale
 ```
 
 Example local test
 
 ```bash
-docker run --rm \
+echo '{"source":"aws.codepipeline","detail-type":"CodePipeline Pipeline Execution State Change","detail":{"pipeline":"ExamplePipeline","state":"SUCCEEDED"},"time":"2025-07-31T13:00:00Z"}' | docker run -i --rm \
   -e MQTT_BROKER_HOST=mybroker.com \
   -e MQTT_TOPIC=pipelines/mypipeline/status \
   -e AWS_REGION=us-east-1 \
   -e AWS_PROFILE=my-profile \
   -v ~/.aws:/root/.aws \
   -v ~/.aws/sso:/root/.aws/sso:ro \
-  --entrypoint node \
-  mqtt-lambda-tailscale \
-  index.js \
-  '{"source":"aws.codepipeline","detail-type":"CodePipeline Pipeline Execution State Change","detail":{"pipeline":"ExamplePipeline","state":"SUCCEEDED"},"time":"2025-07-31T13:00:00Z"}'
+  mqtt-lambda-tailscale
 ```
 
 - Pull requests welcome!

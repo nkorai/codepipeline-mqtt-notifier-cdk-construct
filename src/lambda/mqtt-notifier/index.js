@@ -1,28 +1,68 @@
 const mqtt = require("mqtt");
+const net = require("net");
 const {
   SecretsManagerClient,
   GetSecretValueCommand,
 } = require("@aws-sdk/client-secrets-manager");
 
-// Helper to load a secret by ARN and extract the .value property if it's a JSON object
+// Helper: Load secret by ARN and extract `value` from JSON or return raw string
 async function getSecret(arn) {
   if (!arn) return undefined;
+  console.log(`[INFO] Fetching secret: ${arn}`);
   const client = new SecretsManagerClient();
   const cmd = new GetSecretValueCommand({ SecretId: arn });
   const resp = await client.send(cmd);
   if ("SecretString" in resp) {
     try {
-      // Our default generated secrets are {"value":"..."}
       const parsed = JSON.parse(resp.SecretString);
-      if (typeof parsed === "object" && parsed.value) return parsed.value;
+      if (typeof parsed === "object" && parsed.value) {
+        console.log(`[INFO] Secret ${arn} resolved to .value field`);
+        return parsed.value;
+      }
     } catch {
-      // Not JSON, just return the string
+      console.log(`[INFO] Secret ${arn} is raw string`);
     }
     return resp.SecretString;
   }
   return undefined;
 }
 
+// Helper: Wait for port to open (e.g., MQTT broker via Tailscale)
+async function waitForPortOpen({
+  host,
+  port,
+  timeoutMs = 15000,
+  intervalMs = 500,
+}) {
+  const start = Date.now();
+  let attempt = 1;
+  while (Date.now() - start < timeoutMs) {
+    try {
+      console.log(
+        `[INFO] Attempt ${attempt++}: Connecting to ${host}:${port}...`,
+      );
+      await new Promise((res, rej) => {
+        const socket = net.connect({ host, port, timeout: 1000 });
+        socket.on("connect", () => {
+          socket.destroy();
+          res();
+        });
+        socket.on("error", rej);
+        socket.on("timeout", rej);
+      });
+      console.log(`[INFO] Port is open.`);
+      return true;
+    } catch (err) {
+      console.log(`[WARN] Connection attempt failed: ${err.message}`);
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  }
+  throw new Error(
+    `Timeout: Unable to connect to ${host}:${port} after ${timeoutMs}ms`,
+  );
+}
+
+// Main Lambda handler
 exports.handler = async (event) => {
   const {
     MQTT_BROKER_HOST,
@@ -34,40 +74,51 @@ exports.handler = async (event) => {
   if (!MQTT_BROKER_HOST) throw new Error("MQTT_BROKER_HOST must be set");
   if (!MQTT_TOPIC) throw new Error("MQTT_TOPIC must be set");
 
-  // Load secrets if provided (could do Promise.all, but sequential is fine for three)
-  let mqttUsername, mqttPassword;
-  if (MQTT_USERNAME_SECRET_ARN)
-    mqttUsername = await getSecret(MQTT_USERNAME_SECRET_ARN);
-  if (MQTT_PASSWORD_SECRET_ARN)
-    mqttPassword = await getSecret(MQTT_PASSWORD_SECRET_ARN);
+  const mqttHost = MQTT_BROKER_HOST;
+  const mqttPort = 1883;
+  const brokerUri = `mqtt://${mqttHost}`;
+
+  console.log(`[INFO] Using broker URI: ${brokerUri}`);
+  console.log(`[INFO] Waiting for broker to be reachable...`);
+
+  await waitForPortOpen({ host: mqttHost, port: mqttPort });
 
   const mqttOpts = {};
-  if (mqttUsername) mqttOpts.username = mqttUsername;
-  if (mqttPassword) mqttOpts.password = mqttPassword;
-
-  // Use Tailscale SOCKS5 proxy if present
-  const brokerUri = `mqtt://${MQTT_BROKER_HOST}`;
-  const client = mqtt.connect(brokerUri, mqttOpts);
+  if (MQTT_USERNAME_SECRET_ARN)
+    mqttOpts.username = await getSecret(MQTT_USERNAME_SECRET_ARN);
+  if (MQTT_PASSWORD_SECRET_ARN)
+    mqttOpts.password = await getSecret(MQTT_PASSWORD_SECRET_ARN);
 
   await new Promise((resolve, reject) => {
+    const client = mqtt.connect(brokerUri, mqttOpts);
+    const timeout = setTimeout(() => {
+      client.end();
+      reject(new Error("MQTT connect timeout"));
+    }, 5000);
+
     client.on("connect", () => {
-      console.log(`Connected to MQTT broker at ${brokerUri}`);
+      clearTimeout(timeout);
+      console.log(`[INFO] Connected to MQTT broker`);
+
       const payload = {
-        eventSource: event.source,
-        detailType: event["detail-type"],
-        pipeline: event.detail?.pipeline,
-        state: event.detail?.state,
-        time: event.time,
+        eventSource: event.source ?? "unknown",
+        detailType: event["detail-type"] ?? "unknown",
+        pipeline: event.detail?.pipeline ?? "unknown",
+        state: event.detail?.state ?? "unknown",
+        time: event.time ?? new Date().toISOString(),
         raw: event,
       };
+
+      console.log(`[INFO] Publishing payload: ${JSON.stringify(payload)}`);
+
       client.publish(MQTT_TOPIC, JSON.stringify(payload), { qos: 1 }, (err) => {
         client.end();
         if (err) {
-          console.error("Failed to publish to MQTT:", err);
+          console.error("[ERROR] Failed to publish:", err);
           reject(err);
         } else {
           console.log(
-            `Event (${payload.state}) published to topic ${MQTT_TOPIC} for pipeline ${payload.pipeline}`,
+            `[INFO] Published ${payload.state} for pipeline ${payload.pipeline} to topic ${MQTT_TOPIC}`,
           );
           resolve();
         }
@@ -75,19 +126,35 @@ exports.handler = async (event) => {
     });
 
     client.on("error", (err) => {
+      clearTimeout(timeout);
       client.end();
-      console.error("MQTT client error:", err);
+      console.error("[ERROR] MQTT connection error:", err);
       reject(err);
     });
   });
 };
 
-// Local Testing
+// Local CLI runner (supports stdin or arg)
 if (require.main === module) {
-  const input = process.argv[2];
-  const event = input ? JSON.parse(input) : {};
-  console.log("Lambda handler starting...");
-  exports.handler(event).catch((err) => {
+  const readStdin = async () =>
+    new Promise((res) => {
+      let data = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => (data += chunk));
+      process.stdin.on("end", () => res(data));
+    });
+
+  const main = async () => {
+    let input = process.argv[2];
+    if (!input && !process.stdin.isTTY) input = await readStdin();
+    if (!input) throw new Error("No input event provided via arg or stdin");
+
+    console.log("Lambda handler starting with args:", process.argv);
+    const event = JSON.parse(input);
+    await exports.handler(event);
+  };
+
+  main().catch((err) => {
     console.error("Handler threw:", err);
     process.exit(1);
   });
