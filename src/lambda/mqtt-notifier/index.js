@@ -1,4 +1,5 @@
 const mqtt = require("mqtt");
+const { SocksProxyAgent } = require("socks-proxy-agent");
 const net = require("net");
 const {
   SecretsManagerClient,
@@ -88,53 +89,6 @@ async function waitForTailscaleRoute({
   throw new Error(`[ERROR] Tailscale routes not ready after ${maxWaitMs}ms`);
 }
 
-// Helper: Wait for port to open (e.g., MQTT broker via Tailscale)
-async function waitForPortOpen({
-  host,
-  port,
-  timeoutMs = 15000,
-  intervalMs = 500,
-}) {
-  const start = Date.now();
-  let attempt = 1;
-  while (Date.now() - start < timeoutMs) {
-    try {
-      console.log(
-        `[INFO] Attempt ${attempt++}: Connecting to ${host}:${port}...`,
-      );
-      await new Promise((res, rej) => {
-        const socket = net.connect({ host, port });
-        const timeoutHandle = setTimeout(() => {
-          socket.destroy();
-          rej(new Error("Socket timeout"));
-        }, 3000); // adjust if needed
-
-        socket.on("connect", () => {
-          clearTimeout(timeoutHandle);
-          socket.destroy();
-          res();
-        });
-
-        socket.on("error", (err) => {
-          clearTimeout(timeoutHandle);
-          rej(err instanceof Error ? err : new Error("Socket error"));
-        });
-      });
-      console.log(`[INFO] Port is open.`);
-      return true;
-    } catch (err) {
-      console.log(
-        `[WARN] Connection attempt failed: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      await new Promise((r) => setTimeout(r, intervalMs));
-    }
-  }
-  throw new Error(
-    `Timeout: Unable to connect to ${host}:${port} after ${timeoutMs}ms`,
-  );
-}
 // Main Lambda handler
 exports.handler = async (event) => {
   const {
@@ -147,22 +101,22 @@ exports.handler = async (event) => {
   if (!MQTT_BROKER_HOST) throw new Error("MQTT_BROKER_HOST must be set");
   if (!MQTT_TOPIC) throw new Error("MQTT_TOPIC must be set");
 
-  const mqttHost = MQTT_BROKER_HOST;
-  const mqttPort = 1883;
-  const brokerUri = `mqtt://${mqttHost}`;
-
-  console.log("[INFO] Received event: ", event);
+  const brokerUri = `mqtt://${MQTT_BROKER_HOST}:1883`;
 
   console.log("[INFO] Polling for Tailscale route availability...");
   await waitForTailscaleRoute({ targetIp: MQTT_BROKER_HOST });
   console.log("[INFO] Tailscale routing confirmed. Proceeding...");
 
-  console.log(`[INFO] Using broker URI: ${brokerUri}`);
-  console.log(`[INFO] Waiting for broker to be reachable...`);
+  const socksAgent = new SocksProxyAgent("socks5h://localhost:1055");
+  const mqttOpts = {
+    // Patch the stream to connect via SOCKS proxy
+    connect: (client) =>
+      socksAgent
+        .createConnection({ host: MQTT_BROKER_HOST, port: 1883 })
+        .then((stream) => client._onConnect(null, stream))
+        .catch((err) => client._onError(err)),
+  };
 
-  await waitForPortOpen({ host: mqttHost, port: mqttPort });
-
-  const mqttOpts = {};
   if (MQTT_USERNAME_SECRET_ARN)
     mqttOpts.username = await getSecret(MQTT_USERNAME_SECRET_ARN);
   if (MQTT_PASSWORD_SECRET_ARN)
@@ -170,10 +124,11 @@ exports.handler = async (event) => {
 
   await new Promise((resolve, reject) => {
     const client = mqtt.connect(brokerUri, mqttOpts);
+
     const timeout = setTimeout(() => {
       client.end();
       reject(new Error("MQTT connect timeout"));
-    }, 5000);
+    }, 10000);
 
     client.on("connect", () => {
       clearTimeout(timeout);
@@ -188,17 +143,13 @@ exports.handler = async (event) => {
         raw: event,
       };
 
-      console.log(`[INFO] Publishing payload: ${JSON.stringify(payload)}`);
-
       client.publish(MQTT_TOPIC, JSON.stringify(payload), { qos: 1 }, (err) => {
         client.end();
         if (err) {
           console.error("[ERROR] Failed to publish:", err);
           reject(err);
         } else {
-          console.log(
-            `[INFO] Published ${payload.state} for pipeline ${payload.pipeline} to topic ${MQTT_TOPIC}`,
-          );
+          console.log(`[INFO] Published to topic ${MQTT_TOPIC}`);
           resolve();
         }
       });
