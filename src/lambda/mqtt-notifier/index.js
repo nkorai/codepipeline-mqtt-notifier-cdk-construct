@@ -81,3 +81,14 @@ exports.handler = async (event) => {
     });
   });
 };
+
+// Local Testing
+if (require.main === module) {
+  const input = process.argv[2];
+  const event = input ? JSON.parse(input) : {};
+  console.log("Lambda handler starting...");
+  exports.handler(event).catch((err) => {
+    console.error("Handler threw:", err);
+    process.exit(1);
+  });
+}

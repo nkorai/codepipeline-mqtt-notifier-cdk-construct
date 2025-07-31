@@ -1,6 +1,6 @@
 {
   "name": "codepipeline-mqtt-notifier-cdk-construct",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "author": {
     "name": "Nausherwan Korai"
   },
