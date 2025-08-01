@@ -26,7 +26,8 @@ echo "[INFO] [Tailscale Setup] Starting tailscaled..."
   --socks5-server=localhost:1055 \
   --state="$TAILSCALE_ROOT/tailscaled.state" \
   --statedir="$TAILSCALE_ROOT" \
-  --socket="$TAILSCALE_ROOT/tailscaled.sock" &
+  --socket="$TAILSCALE_ROOT/tailscaled.sock" \
+  --verbose=1 &
 
 # Wait for socket
 for i in $(seq 1 20); do

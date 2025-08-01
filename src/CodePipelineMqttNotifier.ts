@@ -99,7 +99,7 @@ export class CodePipelineMqttNotifier extends Construct {
         path.join(__dirname, "lambda/mqtt-notifier"),
       ),
       timeout: Duration.minutes(2),
-      memorySize: 512,
+      memorySize: 1024,
       environment,
       vpc: props.vpc,
       vpcSubnets: props.subnetSelection,
