@@ -8,4 +8,9 @@ Resources:
     Properties:
       PackageType: Image
       Architectures: [x86_64]
-      ImageUri: mqtt-lambda-tailscale:latest
+      ImageUri: mqttnotifierfunction:latest
+      Timeout: 60
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: .
+      DockerTag: latest

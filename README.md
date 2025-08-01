@@ -199,7 +199,8 @@ docker build -t mqtt-lambda-tailscale .
 Install the SAM CLI, then:
 
 ```bash
-sam local invoke MqttNotifierFunction --env-vars env.json -e event.json --docker-network host
+sam build
+sam local invoke MqttNotifierFunction --env-vars env.json -e event.json --docker-network host --use-container
 ```
 
 - Make sure `env.json` includes the required environment variables (MQTT broker, topic, secrets ARNs, etc.)
