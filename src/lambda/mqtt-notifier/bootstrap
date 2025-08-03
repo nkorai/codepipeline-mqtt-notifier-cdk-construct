@@ -25,7 +25,11 @@ while true; do
   # Run Node.js with the event piped into stdin
   RESULT_FILE=$(mktemp)
   ERROR_FILE=$(mktemp)
-  if echo "$EVENT" | ALL_PROXY="socks5://localhost:1055" node -e '
+
+  echo "[DEBUG] bootstrap ENV:"
+  env | grep -E 'MQTT|AWS|TAILSCALE'
+
+  if echo "$EVENT" | env -i $(env -0 | xargs -0)  ALL_PROXY="socks5://localhost:1055" node -e '
     const { handler } = require("./index.js");
     const chunks = [];
     process.stdin.on("data", chunk => chunks.push(chunk));
