@@ -21,7 +21,7 @@ describe("CodePipelineMqttNotifier", () => {
     // Check for Lambda (Docker image function)
     template.hasResourceProperties("AWS::Lambda::Function", {
       Timeout: 120,
-      MemorySize: 512,
+      MemorySize: 1024,
       Environment: Match.objectLike({
         Variables: Match.objectLike({
           MQTT_BROKER_HOST: "1.2.3.4",

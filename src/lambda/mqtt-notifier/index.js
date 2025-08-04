@@ -21,7 +21,11 @@ process.on("uncaughtException", (err) => {
 
 console.log("[INFO] index.js entered");
 
-async function waitForSocks5Ready({ host = "localhost", port = 1055, timeout = 10000 }) {
+async function waitForSocks5Ready({
+  host = "localhost",
+  port = 1055,
+  timeout = 10000,
+}) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     try {
@@ -81,21 +85,31 @@ async function getSecret(arn) {
   return undefined;
 }
 
-async function waitForTailscaleRoute({ targetIp, maxWaitMs = 20000, intervalMs = 1000 }) {
+async function waitForTailscaleRoute({
+  targetIp,
+  maxWaitMs = 20000,
+  intervalMs = 1000,
+}) {
   const start = Date.now();
   let attempt = 1;
 
   while (Date.now() - start < maxWaitMs) {
     try {
-      console.log(`[INFO] [Tailscale Wait] Attempt ${attempt++}: Checking status...`);
+      console.log(
+        `[INFO] [Tailscale Wait] Attempt ${attempt++}: Checking status...`,
+      );
       const TS_SOCKET = "/tmp/tailscale/tailscaled.sock";
-      const { stdout } = await execAsync(`./tailscale --socket=${TS_SOCKET} status --json`);
+      const { stdout } = await execAsync(
+        `./tailscale --socket=${TS_SOCKET} status --json`,
+      );
       const status = JSON.parse(stdout);
 
       const peerOk =
         status?.Peer &&
         Object.values(status.Peer).some((peer) =>
-          peer.TailscaleIPs?.some((ip) => targetIp?.startsWith(ip.split(".")[0]))
+          peer.TailscaleIPs?.some((ip) =>
+            targetIp?.startsWith(ip.split(".")[0]),
+          ),
         );
 
       if (peerOk || Object.keys(status.Peer ?? {}).length > 0) {
@@ -105,7 +119,9 @@ async function waitForTailscaleRoute({ targetIp, maxWaitMs = 20000, intervalMs =
         console.log(`[WARN] [Tailscale Wait] No usable peers yet`);
       }
     } catch (err) {
-      console.warn(`[WARN] [Tailscale Wait] Failed to get status: ${err.message}`);
+      console.warn(
+        `[WARN] [Tailscale Wait] Failed to get status: ${err.message}`,
+      );
     }
 
     await new Promise((r) => setTimeout(r, intervalMs));
@@ -134,67 +150,79 @@ exports.handler = async (event) => {
 
   // Debug tailscale status
   try {
-    const { stdout } = await execAsync(`./tailscale --socket=/tmp/tailscale/tailscaled.sock status`);
+    const { stdout } = await execAsync(
+      `./tailscale --socket=/tmp/tailscale/tailscaled.sock status`,
+    );
     console.log("[DEBUG] tailscale status:\n" + stdout);
   } catch (e) {
-    console.warn(`[WARN] Could not fetch Tailscale status for debug: ${e.message}`);
+    console.warn(
+      `[WARN] Could not fetch Tailscale status for debug: ${e.message}`,
+    );
   }
 
   await waitForSocks5Ready({ port: 1055 });
 
-  const username = MQTT_USERNAME_SECRET_ARN ? await getSecret(MQTT_USERNAME_SECRET_ARN) : undefined;
-  const password = MQTT_PASSWORD_SECRET_ARN ? await getSecret(MQTT_PASSWORD_SECRET_ARN) : undefined;
+  const username = MQTT_USERNAME_SECRET_ARN
+    ? await getSecret(MQTT_USERNAME_SECRET_ARN)
+    : undefined;
+  const password = MQTT_PASSWORD_SECRET_ARN
+    ? await getSecret(MQTT_PASSWORD_SECRET_ARN)
+    : undefined;
 
-  await retry(async () => {
-    console.log(`[INFO] Connecting to MQTT broker via raw SOCKS5 socket...`);
+  await retry(
+    async () => {
+      console.log(`[INFO] Connecting to MQTT broker via raw SOCKS5 socket...`);
 
-    const { socket } = await socks.createConnection({
-      proxy: {
-        host: "127.0.0.1",
-        port: 1055,
-        type: 5,
-      },
-      command: "connect",
-      destination: {
-        host: MQTT_BROKER_HOST,
-        port: 1883,
-      },
-    });
+      const { socket } = await socks.createConnection({
+        proxy: {
+          host: "127.0.0.1",
+          port: 1055,
+          type: 5,
+        },
+        command: "connect",
+        destination: {
+          host: MQTT_BROKER_HOST,
+          port: 1883,
+        },
+      });
 
-    const conn = mqttCon(socket);
+      const conn = mqttCon(socket);
 
-    return new Promise((resolve, reject) => {
-      conn.on("connack", () => {
-        console.log("✅ Connected!");
-        const payload = {
-          eventSource: event.source ?? "unknown",
-          detailType: event["detail-type"] ?? "unknown",
-          pipeline: event.detail?.pipeline ?? "unknown",
-          state: event.detail?.state ?? "unknown",
-          time: event.time ?? new Date().toISOString(),
-          raw: event,
+      return new Promise((resolve, reject) => {
+        conn.on("connack", () => {
+          console.log("✅ Connected!");
+          const payload = {
+            eventSource: event.source ?? "unknown",
+            detailType: event["detail-type"] ?? "unknown",
+            pipeline: event.detail?.pipeline ?? "unknown",
+            state: event.detail?.state ?? "unknown",
+            time: event.time ?? new Date().toISOString(),
+            raw: event,
+          };
+
+          console.log(`[INFO] Publishing payload: ${JSON.stringify(payload)}`);
+          conn.publish({ topic: MQTT_TOPIC, payload: JSON.stringify(payload) });
+          conn.end();
+          resolve();
+        });
+
+        conn.on("error", (e) => {
+          console.error("❌ MQTT conn error", e);
+          conn.end();
+          reject(e);
+        });
+
+        const connectOpts = {
+          clientId: "lambda-socks5-client",
         };
-
-        console.log(`[INFO] Publishing payload: ${JSON.stringify(payload)}`);
-        conn.publish({ topic: MQTT_TOPIC, payload: JSON.stringify(payload)});
-        conn.end();
-        resolve();
+        if (username) connectOpts.username = username;
+        if (password) connectOpts.password = password;
+        conn.connect(connectOpts);
       });
-
-      conn.on("error", (e) => {
-        console.error("❌ MQTT conn error", e);
-        conn.end();
-        reject(e);
-      });
-
-      const connectOpts = {
-        clientId: "lambda-socks5-client",
-      };
-      if (username) connectOpts.username = username;
-      if (password) connectOpts.password = password;
-      conn.connect(connectOpts);
-    });
-  }, 3, 3000);
+    },
+    3,
+    3000,
+  );
 };
 
 // CLI runner
