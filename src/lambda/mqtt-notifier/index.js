@@ -21,6 +21,10 @@ process.on("uncaughtException", (err) => {
 
 console.log("[INFO] index.js entered");
 
+function isTailscaleEnabled() {
+  return !!process.env.TAILSCALE_AUTH_KEY_SECRET_ARN;
+}
+
 async function waitForSocks5Ready({
   host = "localhost",
   port = 1055,
@@ -95,9 +99,7 @@ async function waitForTailscaleRoute({
 
   while (Date.now() - start < maxWaitMs) {
     try {
-      console.log(
-        `[INFO] [Tailscale Wait] Attempt ${attempt++}: Checking status...`,
-      );
+      console.log(`[INFO] [Tailscale Wait] Attempt ${attempt++}: Checking status...`);
       const TS_SOCKET = "/tmp/tailscale/tailscaled.sock";
       const { stdout } = await execAsync(
         `./tailscale --socket=${TS_SOCKET} status --json`,
@@ -106,22 +108,16 @@ async function waitForTailscaleRoute({
 
       const peerOk =
         status?.Peer &&
-        Object.values(status.Peer).some((peer) =>
-          peer.TailscaleIPs?.some((ip) =>
-            targetIp?.startsWith(ip.split(".")[0]),
-          ),
-        );
+        Object.keys(status.Peer).length > 0;
 
-      if (peerOk || Object.keys(status.Peer ?? {}).length > 0) {
+      if (peerOk) {
         console.log(`[INFO] [Tailscale Wait] Found active peer routes`);
         return;
       } else {
         console.log(`[WARN] [Tailscale Wait] No usable peers yet`);
       }
     } catch (err) {
-      console.warn(
-        `[WARN] [Tailscale Wait] Failed to get status: ${err.message}`,
-      );
+      console.warn(`[WARN] [Tailscale Wait] Failed to get status: ${err.message}`);
     }
 
     await new Promise((r) => setTimeout(r, intervalMs));
@@ -144,23 +140,22 @@ exports.handler = async (event) => {
   if (!MQTT_BROKER_HOST) throw new Error("MQTT_BROKER_HOST must be set");
   if (!MQTT_TOPIC) throw new Error("MQTT_TOPIC must be set");
 
-  console.log("[INFO] Polling for Tailscale route availability...");
-  await waitForTailscaleRoute({ targetIp: MQTT_BROKER_HOST });
-  console.log("[INFO] Tailscale routing confirmed. Proceeding...");
+  if (isTailscaleEnabled()) {
+    console.log("[INFO] Polling for Tailscale route availability...");
+    await waitForTailscaleRoute({ targetIp: MQTT_BROKER_HOST });
+    console.log("[INFO] Tailscale routing confirmed. Proceeding...");
 
-  // Debug tailscale status
-  try {
-    const { stdout } = await execAsync(
-      `./tailscale --socket=/tmp/tailscale/tailscaled.sock status`,
-    );
-    console.log("[DEBUG] tailscale status:\n" + stdout);
-  } catch (e) {
-    console.warn(
-      `[WARN] Could not fetch Tailscale status for debug: ${e.message}`,
-    );
+    try {
+      const { stdout } = await execAsync(
+        `./tailscale --socket=/tmp/tailscale/tailscaled.sock status`,
+      );
+      console.log("[DEBUG] tailscale status:\n" + stdout);
+    } catch (e) {
+      console.warn(`[WARN] Could not fetch Tailscale status for debug: ${e.message}`);
+    }
+
+    await waitForSocks5Ready({ port: 1055 });
   }
-
-  await waitForSocks5Ready({ port: 1055 });
 
   const username = MQTT_USERNAME_SECRET_ARN
     ? await getSecret(MQTT_USERNAME_SECRET_ARN)
@@ -171,20 +166,15 @@ exports.handler = async (event) => {
 
   await retry(
     async () => {
-      console.log(`[INFO] Connecting to MQTT broker via raw SOCKS5 socket...`);
+      console.log(`[INFO] Connecting to MQTT broker...`);
 
-      const { socket } = await socks.createConnection({
-        proxy: {
-          host: "127.0.0.1",
-          port: 1055,
-          type: 5,
-        },
-        command: "connect",
-        destination: {
-          host: MQTT_BROKER_HOST,
-          port: 1883,
-        },
-      });
+      const socket = isTailscaleEnabled()
+        ? (await socks.createConnection({
+            proxy: { host: "127.0.0.1", port: 1055, type: 5 },
+            command: "connect",
+            destination: { host: MQTT_BROKER_HOST, port: 1883 },
+          })).socket
+        : net.connect({ host: MQTT_BROKER_HOST, port: 1883 });
 
       const conn = mqttCon(socket);
 
@@ -212,9 +202,7 @@ exports.handler = async (event) => {
           reject(e);
         });
 
-        const connectOpts = {
-          clientId: "lambda-socks5-client",
-        };
+        const connectOpts = { clientId: "lambda-socks5-client" };
         if (username) connectOpts.username = username;
         if (password) connectOpts.password = password;
         conn.connect(connectOpts);

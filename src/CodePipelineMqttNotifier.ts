@@ -43,6 +43,13 @@ export class CodePipelineMqttNotifier extends Construct {
     props: CodePipelineMqttNotifierProps,
   ) {
     super(scope, id);
+    const environment: Record<string, string> = {
+      MQTT_BROKER_HOST: props.mqttBrokerHost,
+      MQTT_TOPIC: props.mqttTopic,
+      ...(props.mqttBrokerDnsServer && {
+        MQTT_DNS_SERVER: props.mqttBrokerDnsServer,
+      }),
+    };
 
     if (props.enableTailscale) {
       this.tailscaleAuthKeySecret = new Secret(this, "TailscaleAuthKey", {
@@ -52,42 +59,28 @@ export class CodePipelineMqttNotifier extends Construct {
           JSON.stringify({ value: "REPLACE_WITH_TAILSCALE_AUTHKEY" }),
         ),
       });
-    }
 
-    this.mqttBrokerUsernameSecret = new Secret(this, "MqttBrokerUsername", {
-      secretName: `${id}-MqttBrokerUsername`,
-      description: `MQTT Broker Username for ${id}`,
-      secretStringValue: SecretValue.unsafePlainText(
-        JSON.stringify({ value: "REPLACE_WITH_MQTT_USERNAME" }),
-      ),
-    });
-
-    this.mqttBrokerPasswordSecret = new Secret(this, "MqttBrokerPassword", {
-      secretName: `${id}-MqttBrokerPassword`,
-      description: `MQTT Broker Password for ${id}`,
-      secretStringValue: SecretValue.unsafePlainText(
-        JSON.stringify({ value: "REPLACE_WITH_MQTT_PASSWORD" }),
-      ),
-    });
-
-    const environment: Record<string, string> = {
-      MQTT_BROKER_HOST: props.mqttBrokerHost,
-      MQTT_TOPIC: props.mqttTopic,
-      ...(props.mqttBrokerDnsServer && {
-        MQTT_DNS_SERVER: props.mqttBrokerDnsServer,
-      }),
-    };
-
-    if (props.enableTailscale && this.tailscaleAuthKeySecret) {
       environment.TAILSCALE_AUTH_KEY_SECRET_ARN =
         this.tailscaleAuthKeySecret.secretArn;
     }
 
-    if (
-      props.enableMqttAuth &&
-      this.mqttBrokerUsernameSecret &&
-      this.mqttBrokerPasswordSecret
-    ) {
+    if (props.enableMqttAuth) {
+      this.mqttBrokerUsernameSecret = new Secret(this, "MqttBrokerUsername", {
+        secretName: `${id}-MqttBrokerUsername`,
+        description: `MQTT Broker Username for ${id}`,
+        secretStringValue: SecretValue.unsafePlainText(
+          JSON.stringify({ value: "REPLACE_WITH_MQTT_USERNAME" }),
+        ),
+      });
+
+      this.mqttBrokerPasswordSecret = new Secret(this, "MqttBrokerPassword", {
+        secretName: `${id}-MqttBrokerPassword`,
+        description: `MQTT Broker Password for ${id}`,
+        secretStringValue: SecretValue.unsafePlainText(
+          JSON.stringify({ value: "REPLACE_WITH_MQTT_PASSWORD" }),
+        ),
+      });
+
       environment.MQTT_USERNAME_SECRET_ARN =
         this.mqttBrokerUsernameSecret.secretArn;
       environment.MQTT_PASSWORD_SECRET_ARN =
