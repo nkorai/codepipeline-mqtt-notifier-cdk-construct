@@ -27,7 +27,7 @@ echo "[INFO] [Tailscale Setup] Starting tailscaled..."
   --state="$TAILSCALE_ROOT/tailscaled.state" \
   --statedir="$TAILSCALE_ROOT" \
   --socket="$TAILSCALE_ROOT/tailscaled.sock" \
-  --verbose=1 &
+  --verbose=2 &
 
 # Wait for socket
 for i in $(seq 1 20); do
@@ -41,8 +41,8 @@ done
 echo "[INFO] [Tailscale Setup] Running tailscale up..."
 /var/task/tailscale --socket="$TAILSCALE_ROOT/tailscaled.sock" up \
   --auth-key="$TS_AUTH_KEY" \
-  --hostname=mqtt-lambda \
-  --accept-routes
+  --hostname=mqtt-tailscale-lambda \
+  --accept-routes=true
 
 if [ -n "$MQTT_DNS_SERVER" ]; then
   echo "[INFO] [Tailscale Setup] Overriding /etc/resolv.conf with $MQTT_DNS_SERVER"

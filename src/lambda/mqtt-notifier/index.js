@@ -1,5 +1,5 @@
-const mqtt = require("mqtt");
-const { SocksProxyAgent } = require("socks-proxy-agent");
+const socks = require("socks").SocksClient;
+const mqttCon = require("mqtt-connection");
 const net = require("net");
 const {
   SecretsManagerClient,
@@ -46,7 +46,6 @@ async function waitForSocks5Ready({ host = "localhost", port = 1055, timeout = 1
   throw new Error("SOCKS5 proxy did not become ready in time");
 }
 
-
 async function retry(fn, retries = 3, delayMs = 2000) {
   let attempt = 1;
   while (attempt <= retries) {
@@ -61,7 +60,6 @@ async function retry(fn, retries = 3, delayMs = 2000) {
   }
 }
 
-// Helper: Load secret by ARN and extract `value` from JSON or return raw string
 async function getSecret(arn) {
   if (!arn) return undefined;
   console.log(`[INFO] Fetching secret: ${arn}`);
@@ -83,33 +81,22 @@ async function getSecret(arn) {
   return undefined;
 }
 
-// Wait until Tailscale is connected and routes are available
-async function waitForTailscaleRoute({
-  targetIp,
-  maxWaitMs = 20000,
-  intervalMs = 1000,
-}) {
+async function waitForTailscaleRoute({ targetIp, maxWaitMs = 20000, intervalMs = 1000 }) {
   const start = Date.now();
   let attempt = 1;
 
   while (Date.now() - start < maxWaitMs) {
     try {
-      console.log(
-        `[INFO] [Tailscale Wait] Attempt ${attempt++}: Checking status...`,
-      );
-
+      console.log(`[INFO] [Tailscale Wait] Attempt ${attempt++}: Checking status...`);
       const TS_SOCKET = "/tmp/tailscale/tailscaled.sock";
-      const { stdout } = await execAsync(
-        `./tailscale --socket=${TS_SOCKET} status --json`,
-      );
+      const { stdout } = await execAsync(`./tailscale --socket=${TS_SOCKET} status --json`);
       const status = JSON.parse(stdout);
 
-      const peerOk = Object.values(status.Peer).some(
-        (peer) =>
-          peer.TailscaleIPs?.some((ip) =>
-            targetIp?.startsWith(ip.split(".")[0]),
-          ) || false,
-      );
+      const peerOk =
+        status?.Peer &&
+        Object.values(status.Peer).some((peer) =>
+          peer.TailscaleIPs?.some((ip) => targetIp?.startsWith(ip.split(".")[0]))
+        );
 
       if (peerOk || Object.keys(status.Peer ?? {}).length > 0) {
         console.log(`[INFO] [Tailscale Wait] Found active peer routes`);
@@ -118,9 +105,7 @@ async function waitForTailscaleRoute({
         console.log(`[WARN] [Tailscale Wait] No usable peers yet`);
       }
     } catch (err) {
-      console.warn(
-        `[WARN] [Tailscale Wait] Failed to get status: ${err.message}`,
-      );
+      console.warn(`[WARN] [Tailscale Wait] Failed to get status: ${err.message}`);
     }
 
     await new Promise((r) => setTimeout(r, intervalMs));
@@ -128,8 +113,6 @@ async function waitForTailscaleRoute({
 
   throw new Error(`[ERROR] Tailscale routes not ready after ${maxWaitMs}ms`);
 }
-
-  console.log("[DEBUG] 1 ENV:", process.env);
 
 // Main Lambda handler
 exports.handler = async (event) => {
@@ -149,7 +132,7 @@ exports.handler = async (event) => {
   await waitForTailscaleRoute({ targetIp: MQTT_BROKER_HOST });
   console.log("[INFO] Tailscale routing confirmed. Proceeding...");
 
-  // Extra: Debug Tailscale full status
+  // Debug tailscale status
   try {
     const { stdout } = await execAsync(`./tailscale --socket=/tmp/tailscale/tailscaled.sock status`);
     console.log("[DEBUG] tailscale status:\n" + stdout);
@@ -157,36 +140,32 @@ exports.handler = async (event) => {
     console.warn(`[WARN] Could not fetch Tailscale status for debug: ${e.message}`);
   }
 
-  const socksAgent = new SocksProxyAgent("socks5h://localhost:1055");
-  const mqttHost = MQTT_BROKER_HOST;
-  const mqttPort = 1883;
+  await waitForSocks5Ready({ port: 1055 });
 
   const username = MQTT_USERNAME_SECRET_ARN ? await getSecret(MQTT_USERNAME_SECRET_ARN) : undefined;
   const password = MQTT_PASSWORD_SECRET_ARN ? await getSecret(MQTT_PASSWORD_SECRET_ARN) : undefined;
-  
-  await waitForSocks5Ready({ port: 1055 });
 
   await retry(async () => {
-    const stream = await socksAgent.createConnection({ host: mqttHost, port: mqttPort });
+    console.log(`[INFO] Connecting to MQTT broker via raw SOCKS5 socket...`);
+
+    const { socket } = await socks.createConnection({
+      proxy: {
+        host: "127.0.0.1",
+        port: 1055,
+        type: 5,
+      },
+      command: "connect",
+      destination: {
+        host: MQTT_BROKER_HOST,
+        port: 1883,
+      },
+    });
+
+    const conn = mqttCon(socket);
 
     return new Promise((resolve, reject) => {
-      const mqttOpts = {
-        stream,
-        username,
-        password,
-      };
-
-      const client = mqtt.connect(`mqtt://${mqttHost}:${mqttPort}`, mqttOpts);
-
-      const timeout = setTimeout(() => {
-        client.end();
-        reject(new Error("MQTT connect timeout (15s)"));
-      }, 15000);
-
-      client.on("connect", () => {
-        clearTimeout(timeout);
-        console.log(`[INFO] Connected to MQTT broker via Tailscale SOCKS5`);
-
+      conn.on("connack", () => {
+        console.log("✅ Connected!");
         const payload = {
           eventSource: event.source ?? "unknown",
           detailType: event["detail-type"] ?? "unknown",
@@ -197,34 +176,29 @@ exports.handler = async (event) => {
         };
 
         console.log(`[INFO] Publishing payload: ${JSON.stringify(payload)}`);
-
-        client.publish(MQTT_TOPIC, JSON.stringify(payload), { qos: 1 }, (err) => {
-          client.end();
-          if (err) {
-            console.error("[ERROR] Failed to publish:", err);
-            reject(err);
-          } else {
-            console.log(`[INFO] Published ${payload.state} for pipeline ${payload.pipeline}`);
-            resolve();
-          }
-        });
+        conn.publish({ topic: MQTT_TOPIC, payload: JSON.stringify(payload)});
+        conn.end();
+        resolve();
       });
 
-      client.on("error", (err) => {
-        clearTimeout(timeout);
-        client.end();
-        reject(err);
+      conn.on("error", (e) => {
+        console.error("❌ MQTT conn error", e);
+        conn.end();
+        reject(e);
       });
+
+      const connectOpts = {
+        clientId: "lambda-socks5-client",
+      };
+      if (username) connectOpts.username = username;
+      if (password) connectOpts.password = password;
+      conn.connect(connectOpts);
     });
-  }, 3, 3000); // Retry up to 3 times with backoff
+  }, 3, 3000);
 };
 
-
-// Local CLI runner (supports stdin or arg)
-if (
-  require.main === module &&
-  process.env.AWS_LAMBDA_FUNCTION_NAME === undefined
-) {
+// CLI runner
+if (require.main === module && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
   const readStdin = async () =>
     new Promise((res) => {
       let data = "";

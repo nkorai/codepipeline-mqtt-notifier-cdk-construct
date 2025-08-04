@@ -17,7 +17,7 @@ Resources:
           MQTT_TOPIC: ""
           MQTT_USERNAME_SECRET_ARN: ""
           MQTT_PASSWORD_SECRET_ARN: ""
-          TS_AUTH_KEY: ""
+          TAILSCALE_AUTH_KEY_SECRET_ARN: ""
     Metadata:
       Dockerfile: Dockerfile
       DockerContext: .
