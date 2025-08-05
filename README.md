@@ -1,5 +1,7 @@
 # CodePipelineMqttNotifierCDKConstruct
 
+https://github.com/nkorai/codepipeline-mqtt-notifier-cdk-construct
+
 > **AWS CDK Construct to forward CodePipeline events to an MQTT broker (with optional Tailscale integration).**  
 > Ideal for home automation, dashboards, build monitors, and custom pipeline notifications.
 
@@ -217,4 +219,4 @@ MIT
 
 ### Questions or need a feature?
 
-Open an issue or PR at: https://github.com/yourusername/codepipeline-mqtt-notifier-cdk-construct/issues
+Open an issue or PR at: https://github.com/nkorai/codepipeline-mqtt-notifier-cdk-construct/issues

@@ -99,16 +99,16 @@ async function waitForTailscaleRoute({
 
   while (Date.now() - start < maxWaitMs) {
     try {
-      console.log(`[INFO] [Tailscale Wait] Attempt ${attempt++}: Checking status...`);
+      console.log(
+        `[INFO] [Tailscale Wait] Attempt ${attempt++}: Checking status...`,
+      );
       const TS_SOCKET = "/tmp/tailscale/tailscaled.sock";
       const { stdout } = await execAsync(
         `./tailscale --socket=${TS_SOCKET} status --json`,
       );
       const status = JSON.parse(stdout);
 
-      const peerOk =
-        status?.Peer &&
-        Object.keys(status.Peer).length > 0;
+      const peerOk = status?.Peer && Object.keys(status.Peer).length > 0;
 
       if (peerOk) {
         console.log(`[INFO] [Tailscale Wait] Found active peer routes`);
@@ -117,7 +117,9 @@ async function waitForTailscaleRoute({
         console.log(`[WARN] [Tailscale Wait] No usable peers yet`);
       }
     } catch (err) {
-      console.warn(`[WARN] [Tailscale Wait] Failed to get status: ${err.message}`);
+      console.warn(
+        `[WARN] [Tailscale Wait] Failed to get status: ${err.message}`,
+      );
     }
 
     await new Promise((r) => setTimeout(r, intervalMs));
@@ -151,7 +153,9 @@ exports.handler = async (event) => {
       );
       console.log("[DEBUG] tailscale status:\n" + stdout);
     } catch (e) {
-      console.warn(`[WARN] Could not fetch Tailscale status for debug: ${e.message}`);
+      console.warn(
+        `[WARN] Could not fetch Tailscale status for debug: ${e.message}`,
+      );
     }
 
     await waitForSocks5Ready({ port: 1055 });
@@ -169,11 +173,13 @@ exports.handler = async (event) => {
       console.log(`[INFO] Connecting to MQTT broker...`);
 
       const socket = isTailscaleEnabled()
-        ? (await socks.createConnection({
-            proxy: { host: "127.0.0.1", port: 1055, type: 5 },
-            command: "connect",
-            destination: { host: MQTT_BROKER_HOST, port: 1883 },
-          })).socket
+        ? (
+            await socks.createConnection({
+              proxy: { host: "127.0.0.1", port: 1055, type: 5 },
+              command: "connect",
+              destination: { host: MQTT_BROKER_HOST, port: 1883 },
+            })
+          ).socket
         : net.connect({ host: MQTT_BROKER_HOST, port: 1883 });
 
       const conn = mqttCon(socket);
